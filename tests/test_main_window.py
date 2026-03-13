@@ -3,6 +3,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import QGroupBox
 
+from product_description_tool.collapsible_panel import CollapsiblePanel
 from product_description_tool.config import AppConfig, ConfigStore, FieldConfig
 from product_description_tool.main_window import MainWindow
 
@@ -116,6 +117,7 @@ def _load_window_csv(window: MainWindow, monkeypatch, csv_path: Path) -> None:
 def test_loading_and_selecting_row_updates_previews(qtbot, tmp_path: Path, monkeypatch) -> None:
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
+    window.show()
     window.config.csv.result_description = "generated"
 
     csv_path = _write_csv(tmp_path)
@@ -134,6 +136,7 @@ def test_loading_and_selecting_row_updates_previews(qtbot, tmp_path: Path, monke
 def test_window_title_tracks_current_document_and_dirty_state(qtbot, tmp_path: Path, monkeypatch) -> None:
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
+    window.show()
     window.config.csv.result_description = "generated"
     csv_path = _write_csv(tmp_path)
     _load_window_csv(window, monkeypatch, csv_path)
@@ -163,6 +166,7 @@ def test_edit_selected_description_updates_model(qtbot, tmp_path: Path, monkeypa
 
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
+    window.show()
     window.config.csv.result_description = "generated"
     csv_path = _write_csv(tmp_path)
     _load_window_csv(window, monkeypatch, csv_path)
@@ -177,6 +181,7 @@ def test_edit_selected_description_updates_model(qtbot, tmp_path: Path, monkeypa
 def test_preview_selected_updates_only_current_row(qtbot, tmp_path: Path, monkeypatch) -> None:
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
+    window.show()
     window.config.csv.result_description = "generated"
     window.generation_service = FakeGenerationService()
     csv_path = _write_csv(tmp_path)
@@ -193,6 +198,7 @@ def test_preview_selected_updates_only_current_row(qtbot, tmp_path: Path, monkey
 def test_process_all_overwrites_every_row(qtbot, tmp_path: Path, monkeypatch) -> None:
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
+    window.show()
     window.config.csv.result_description = "generated"
     window.generation_service = FakeGenerationService()
     csv_path = _write_csv(tmp_path)
@@ -208,6 +214,7 @@ def test_process_all_overwrites_every_row(qtbot, tmp_path: Path, monkeypatch) ->
 def test_filters_do_not_change_underlying_processing_scope(qtbot, tmp_path: Path, monkeypatch) -> None:
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
+    window.show()
     window.config.csv.result_description = "generated"
     window.generation_service = FakeGenerationService()
     csv_path = _write_csv(tmp_path)
@@ -230,6 +237,7 @@ def test_filters_do_not_change_underlying_processing_scope(qtbot, tmp_path: Path
 def test_menu_actions_have_requested_shortcuts(qtbot, tmp_path: Path) -> None:
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
+    window.show()
 
     assert window.process_all_action.shortcut().toString() == "Ctrl+P"
     assert window.process_current_action.shortcut().toString() == "Ctrl+Enter"
@@ -240,6 +248,7 @@ def test_menu_actions_have_requested_shortcuts(qtbot, tmp_path: Path) -> None:
 def test_cancel_batch_processing_stops_before_all_rows_finish(qtbot, tmp_path: Path, monkeypatch) -> None:
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
+    window.show()
     window.config.csv.result_description = "generated"
     window.generation_service = SlowCancellableGenerationService()
     csv_path = _write_csv(tmp_path, row_count=5)
@@ -262,6 +271,7 @@ def test_open_settings_updates_table_and_preserves_selected_row(qtbot, tmp_path:
 
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
+    window.show()
     window.config.csv.result_description = "generated"
     csv_path = _write_csv(tmp_path)
     _load_window_csv(window, monkeypatch, csv_path)
@@ -280,9 +290,30 @@ def test_open_settings_persists_updated_config_on_ok(qtbot, tmp_path: Path, monk
 
     window = MainWindow(config_store=ConfigStore(config_path))
     qtbot.addWidget(window)
+    window.show()
     window.open_settings()
 
     persisted = ConfigStore(config_path).load()
     assert persisted.csv.delimiter == ";"
     assert persisted.csv.quotechar == '"'
     assert persisted.csv.fields["description"].label == "Product Description"
+
+
+def test_main_window_uses_three_collapsible_panels_with_equal_initial_sizes(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.waitUntil(lambda: window.sections_splitter.sizes()[0] > 0)
+    panels = [window.csv_panel, window.prompt_panel, window.description_panel]
+
+    assert [panel.title for panel in panels] == ["CSV Data", "System Prompt", "Description"]
+    sizes = window.sections_splitter.sizes()
+    assert max(sizes) - min(sizes) <= 40
+
+    window.prompt_panel.set_expanded(False)
+    qtbot.waitUntil(lambda: not window.prompt_panel.content.isVisible())
+
+    collapsed_sizes = window.sections_splitter.sizes()
+    assert collapsed_sizes[1] < collapsed_sizes[0]
+    assert collapsed_sizes[1] < collapsed_sizes[2]

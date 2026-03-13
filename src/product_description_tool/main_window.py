@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Qt
+from PySide6.QtCore import QThread, QTimer, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
     QDialog,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -23,6 +22,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
+from product_description_tool.collapsible_panel import CollapsiblePanel
 from product_description_tool.config import AppConfig, ConfigStore
 from product_description_tool.csv_repository import CsvDocument, CsvRepository
 from product_description_tool.dialogs import FilterDialog, HtmlEditorDialog, SettingsDialog
@@ -63,6 +63,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._refresh_table_from_document()
         self._update_window_title()
+        QTimer.singleShot(0, self._rebalance_panel_sizes)
 
     def _build_ui(self) -> None:
         self._build_menus()
@@ -72,25 +73,28 @@ class MainWindow(QMainWindow):
         root_layout.setSpacing(10)
         self.setCentralWidget(central)
 
-        prompt_group = QGroupBox("System Prompt")
-        prompt_layout = QVBoxLayout(prompt_group)
-        self.prompt_path_label = QLabel("Prompt file: unsaved")
-        prompt_layout.addWidget(self.prompt_path_label)
+        self.sections_splitter = QSplitter(Qt.Orientation.Vertical)
+        root_layout.addWidget(self.sections_splitter, 1)
 
-        self.prompt_edit = QPlainTextEdit()
-        self.prompt_edit.setPlaceholderText("Use placeholders like {{product_name}}")
-        prompt_layout.addWidget(self.prompt_edit)
-        root_layout.addWidget(prompt_group, 1)
+        self.csv_panel = CollapsiblePanel("CSV Data")
+        self.prompt_panel = CollapsiblePanel("System Prompt")
+        self.description_panel = CollapsiblePanel("Description")
 
-        table_group = QGroupBox("CSV Data")
-        table_layout = QVBoxLayout(table_group)
+        for panel in [self.csv_panel, self.prompt_panel, self.description_panel]:
+            panel.toggled.connect(self._rebalance_panel_sizes)
+            self.sections_splitter.addWidget(panel)
+        self.sections_splitter.setChildrenCollapsible(False)
+
+        csv_layout = QVBoxLayout(self.csv_panel.content)
+        csv_layout.setContentsMargins(0, 0, 0, 0)
+        csv_layout.setSpacing(8)
 
         table_actions = QHBoxLayout()
         self.filter_button = QPushButton("Filter")
         self.filter_button.clicked.connect(self.open_filter_dialog)
         table_actions.addWidget(self.filter_button)
         table_actions.addStretch(1)
-        table_layout.addLayout(table_actions)
+        csv_layout.addLayout(table_actions)
 
         self.table_view = QTableView()
         self.table_view.setModel(self.proxy_model)
@@ -99,44 +103,63 @@ class MainWindow(QMainWindow):
         self.table_view.setSortingEnabled(False)
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
-        table_layout.addWidget(self.table_view, 1)
-        root_layout.addWidget(table_group, 3)
+        csv_layout.addWidget(self.table_view, 1)
+
+        prompt_layout = QVBoxLayout(self.prompt_panel.content)
+        prompt_layout.setContentsMargins(0, 0, 0, 0)
+        prompt_layout.setSpacing(8)
+        self.prompt_path_label = QLabel("Prompt file: unsaved")
+        prompt_layout.addWidget(self.prompt_path_label)
+
+        self.prompt_edit = QPlainTextEdit()
+        self.prompt_edit.setPlaceholderText("Use placeholders like {{product_name}}")
+        prompt_layout.addWidget(self.prompt_edit)
 
         action_row = QHBoxLayout()
+        action_row.addStretch(1)
         self.preview_button = QPushButton("Preview Selected")
         self.preview_button.clicked.connect(self.preview_selected_row)
         self.process_button = QPushButton("Process All")
         self.process_button.clicked.connect(self.process_all_rows)
+        action_row.addWidget(self.preview_button)
+        action_row.addWidget(self.process_button)
+        prompt_layout.addLayout(action_row)
+
+        description_layout = QVBoxLayout(self.description_panel.content)
+        description_layout.setContentsMargins(0, 0, 0, 0)
+        description_layout.setSpacing(8)
+
+        preview_splitter = QSplitter(Qt.Orientation.Horizontal)
+        original_container = QWidget()
+        original_layout = QVBoxLayout(original_container)
+        original_layout.setContentsMargins(0, 0, 0, 0)
+        original_layout.setSpacing(6)
+        original_layout.addWidget(QLabel("Original"))
+        self.original_preview = HtmlPreview()
+        original_layout.addWidget(self.original_preview)
         self.edit_original_button = QPushButton("Edit Original")
         self.edit_original_button.clicked.connect(
             lambda checked=False: self.edit_selected_description(self.config.csv.original_description)
         )
+        original_layout.addWidget(self.edit_original_button, alignment=Qt.AlignmentFlag.AlignRight)
+
+        result_container = QWidget()
+        result_layout = QVBoxLayout(result_container)
+        result_layout.setContentsMargins(0, 0, 0, 0)
+        result_layout.setSpacing(6)
+        result_layout.addWidget(QLabel("Produced"))
+        self.result_preview = HtmlPreview()
+        result_layout.addWidget(self.result_preview)
         self.edit_result_button = QPushButton("Edit Result")
         self.edit_result_button.clicked.connect(
             lambda checked=False: self.edit_selected_description(self.config.csv.result_description)
         )
-        action_row.addWidget(self.preview_button)
-        action_row.addWidget(self.process_button)
-        action_row.addWidget(self.edit_original_button)
-        action_row.addWidget(self.edit_result_button)
-        action_row.addStretch(1)
-        root_layout.addLayout(action_row)
+        result_layout.addWidget(self.edit_result_button, alignment=Qt.AlignmentFlag.AlignRight)
 
-        preview_splitter = QSplitter(Qt.Orientation.Horizontal)
-        original_group = QGroupBox("Original Description")
-        original_layout = QVBoxLayout(original_group)
-        self.original_preview = HtmlPreview()
-        original_layout.addWidget(self.original_preview)
-
-        result_group = QGroupBox("Produced Description")
-        result_layout = QVBoxLayout(result_group)
-        self.result_preview = HtmlPreview()
-        result_layout.addWidget(self.result_preview)
-
-        preview_splitter.addWidget(original_group)
-        preview_splitter.addWidget(result_group)
+        preview_splitter.addWidget(original_container)
+        preview_splitter.addWidget(result_container)
         preview_splitter.setSizes([1, 1])
-        root_layout.addWidget(preview_splitter, 2)
+        description_layout.addWidget(preview_splitter, 1)
 
         self.status = QStatusBar()
         self.setStatusBar(self.status)
@@ -605,6 +628,27 @@ class MainWindow(QMainWindow):
         for column, width in enumerate(scaled_widths):
             self.table_view.setColumnWidth(column, width)
         header.setStretchLastSection(False)
+
+    def _rebalance_panel_sizes(self, *_args) -> None:
+        panels = [self.csv_panel, self.prompt_panel, self.description_panel]
+        total_height = self.sections_splitter.size().height()
+        if total_height <= 0:
+            return
+        handle_space = self.sections_splitter.handleWidth() * max(len(panels) - 1, 0)
+        collapsed_space = sum(panel.header_height() for panel in panels if not panel.expanded)
+        expanded_panels = [panel for panel in panels if panel.expanded]
+        remaining_height = max(total_height - handle_space - collapsed_space, 0)
+
+        sizes: list[int] = []
+        for panel in panels:
+            if not panel.expanded:
+                sizes.append(panel.header_height())
+                continue
+            if not expanded_panels:
+                sizes.append(panel.header_height())
+                continue
+            sizes.append(max(panel.header_height() * 2, remaining_height // len(expanded_panels)))
+        self.sections_splitter.setSizes(sizes)
 
     def _restore_selected_source_row(self, row_index: int) -> None:
         source_index = self.table_model.index(row_index, 0)
