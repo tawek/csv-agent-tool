@@ -492,6 +492,7 @@ class MainWindow(QMainWindow):
 
     def _on_prompt_selection_changed(self) -> None:
         self._load_current_prompt_into_editor()
+        self._sync_right_preview_field_to_current_prompt()
 
     def _load_current_prompt_into_editor(self) -> None:
         prompt = self._current_prompt()
@@ -884,6 +885,7 @@ class MainWindow(QMainWindow):
             combo.blockSignals(False)
             combo.setEnabled(bool(headers))
 
+        self._sync_right_preview_field_to_current_prompt()
         self._update_interactive_state()
         self._refresh_current_selection()
 
@@ -988,6 +990,14 @@ class MainWindow(QMainWindow):
         index = self.prompt_selector.findText(output_field)
         if index >= 0:
             self.prompt_selector.setCurrentIndex(index)
+
+    def _sync_right_preview_field_to_current_prompt(self) -> None:
+        prompt = self._current_prompt()
+        if prompt is None:
+            return
+        index = self.right_field_combo.findText(prompt.output_field)
+        if index >= 0:
+            self.right_field_combo.setCurrentIndex(index)
 
     def _fit_table_columns_to_window(self) -> None:
         header = self.table_view.horizontalHeader()

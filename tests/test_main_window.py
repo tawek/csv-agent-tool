@@ -303,6 +303,22 @@ def test_description_field_selector_reloads_preview(qtbot, tmp_path: Path, monke
     qtbot.waitUntil(lambda: window.last_result_preview_html == "A-1")
 
 
+def test_prompt_selection_updates_right_preview_field(qtbot, tmp_path: Path, monkeypatch) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    window.project.csv.result_description = "generated"
+    csv_path = _write_csv(tmp_path)
+    _import_window_csv(window, monkeypatch, csv_path)
+    _add_prompt(window, output_field="generated", prompt="First {{sku}}")
+    _add_prompt(window, output_field="seo", prompt="Second {{sku}}")
+
+    window.prompt_selector.setCurrentText("generated")
+    window.prompt_selector.setCurrentText("seo")
+
+    assert window.right_field_combo.currentText() == "seo"
+
+
 def test_menu_actions_have_requested_shortcuts(qtbot, tmp_path: Path) -> None:
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
