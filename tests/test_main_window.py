@@ -3,7 +3,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import QGroupBox
 
-from product_description_tool.config import ConfigStore
+from product_description_tool.config import AppConfig, ConfigStore, FieldConfig
 from product_description_tool.main_window import MainWindow
 
 
@@ -71,6 +71,22 @@ class SlowCancellableGenerationService(FakeGenerationService):
         return results
 
 
+class FakeSettingsDialog:
+    def __init__(self, config, *, current_headers=None, parent=None) -> None:
+        self._config = AppConfig.from_dict(config.to_dict())
+        self._config.csv.fields = {
+            "sku": FieldConfig(label="SKU", show=False),
+            "description": FieldConfig(label="Product Description", show=True),
+            "generated": FieldConfig(label="Generated", show=True),
+        }
+
+    def exec(self) -> bool:
+        return True
+
+    def get_config(self):
+        return self._config
+
+
 def _write_csv(tmp_path: Path, row_count: int = 2) -> Path:
     csv_path = tmp_path / "products.csv"
     rows = ['A-1,"<p>Alpha</p>","<p>Existing</p>"']
@@ -105,9 +121,12 @@ def test_loading_and_selecting_row_updates_previews(qtbot, tmp_path: Path, monke
 
     window.table_view.selectRow(1)
     qtbot.waitUntil(lambda: window.last_original_preview_html == "<p>Beta 1</p>")
+    qtbot.waitUntil(lambda: window.table_view.viewport().width() > 0)
 
     assert window.last_result_preview_html == ""
     assert "Files" not in [group.title() for group in window.findChildren(QGroupBox)]
+    total_width = sum(window.table_view.columnWidth(index) for index in range(window.proxy_model.columnCount()))
+    assert total_width <= window.table_view.viewport().width() + 4
 
 
 def test_window_title_tracks_current_document_and_dirty_state(qtbot, tmp_path: Path, monkeypatch) -> None:
@@ -234,3 +253,20 @@ def test_cancel_batch_processing_stops_before_all_rows_finish(qtbot, tmp_path: P
     qtbot.waitUntil(lambda: window._worker_thread is None)
     assert window.status.currentMessage() == "Processing cancelled"
     assert window.document.rows[-1]["generated"] == ""
+
+
+def test_open_settings_updates_table_and_preserves_selected_row(qtbot, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("product_description_tool.main_window.SettingsDialog", FakeSettingsDialog)
+
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.config.csv.result_description = "generated"
+    csv_path = _write_csv(tmp_path)
+    _load_window_csv(window, monkeypatch, csv_path)
+    window.table_view.selectRow(1)
+
+    window.open_settings()
+
+    qtbot.waitUntil(lambda: window._selected_source_row() == 1)
+    assert window.table_model.visible_headers == ["description", "generated"]
+    assert window.table_model.headerData(0, Qt.Orientation.Horizontal) == "Product Description"

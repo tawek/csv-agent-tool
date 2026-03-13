@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QTableView,
     QVBoxLayout,
     QWidget,
+    QHeaderView,
 )
 
 from product_description_tool.config import AppConfig, ConfigStore
@@ -96,6 +97,7 @@ class MainWindow(QMainWindow):
         self.table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self.table_view.setSortingEnabled(False)
+        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
         table_layout.addWidget(self.table_view, 1)
         root_layout.addWidget(table_group, 3)
@@ -195,28 +197,39 @@ class MainWindow(QMainWindow):
         process_menu.addActions([self.process_all_action, self.process_current_action])
 
     def _refresh_table_from_document(self) -> None:
+        selected_source_row = self._selected_source_row()
         self.table_model.set_document(self.document, self.config.csv)
         self.proxy_model.clear_filters()
         self.filter_patterns = {}
-        self.table_view.resizeColumnsToContents()
-        if self.proxy_model.rowCount() > 0:
+        self._fit_table_columns_to_window()
+        if selected_source_row is not None:
+            self._restore_selected_source_row(selected_source_row)
+        elif self.proxy_model.rowCount() > 0:
             self.table_view.selectRow(0)
         else:
             self._update_previews("", "")
         self._update_filter_button_text()
 
     def open_settings(self) -> None:
-        dialog = SettingsDialog(self.config, self)
+        selected_source_row = self._selected_source_row()
+        dialog = SettingsDialog(
+            self.config,
+            current_headers=self.document.headers if self.document is not None else [],
+            parent=self,
+        )
         if dialog.exec():
             self.config = dialog.get_config()
             self.config_store.save(self.config)
             self.table_model.update_config(self.config.csv)
-            self.proxy_model.clear_filters()
-            self.filter_patterns = {}
+            self._sync_filter_patterns_with_visible_columns()
+            self._apply_filter_patterns()
             self._ensure_result_column()
-            self.table_view.resizeColumnsToContents()
+            self._fit_table_columns_to_window()
             self._update_filter_button_text()
-            self._refresh_current_selection()
+            if selected_source_row is not None:
+                self._restore_selected_source_row(selected_source_row)
+            else:
+                self._refresh_current_selection()
 
     def load_prompt(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -533,9 +546,7 @@ class MainWindow(QMainWindow):
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.filter_patterns = dialog.filters()
-            self.proxy_model.clear_filters()
-            for index, header in enumerate(self.table_model.visible_headers):
-                self.proxy_model.set_filter_pattern(index, self.filter_patterns.get(header, ""))
+            self._apply_filter_patterns()
             self._update_filter_button_text()
 
     def _update_filter_button_text(self) -> None:
@@ -550,6 +561,75 @@ class MainWindow(QMainWindow):
             self.prompt_path_label.setText("Prompt file: unsaved")
         else:
             self.prompt_path_label.setText(f"Prompt file: {self.current_prompt_path}")
+
+    def _fit_table_columns_to_window(self) -> None:
+        header = self.table_view.horizontalHeader()
+        column_count = self.proxy_model.columnCount()
+        if column_count == 0:
+            return
+
+        self.table_view.resizeColumnsToContents()
+        available_width = max(self.table_view.viewport().width() - 2, 1)
+        base_widths = [
+            max(self.table_view.columnWidth(column), 60)
+            for column in range(column_count)
+        ]
+        total_width = sum(base_widths)
+        if total_width <= 0:
+            return
+
+        minimum_width = max(40, available_width // column_count)
+        scaled_widths = []
+        remaining_width = available_width
+        for index, width in enumerate(base_widths):
+            if index == column_count - 1:
+                scaled = max(minimum_width, remaining_width)
+            else:
+                scaled = max(minimum_width, round(available_width * width / total_width))
+                remaining_width -= scaled
+                columns_left = column_count - index - 1
+                minimum_reserved = columns_left * minimum_width
+                if remaining_width < minimum_reserved:
+                    overflow = minimum_reserved - remaining_width
+                    scaled = max(minimum_width, scaled - overflow)
+                    remaining_width += overflow
+            scaled_widths.append(scaled)
+
+        adjusted_total = sum(scaled_widths)
+        if adjusted_total != available_width:
+            scaled_widths[-1] = max(
+                minimum_width,
+                scaled_widths[-1] + (available_width - adjusted_total),
+            )
+
+        for column, width in enumerate(scaled_widths):
+            self.table_view.setColumnWidth(column, width)
+        header.setStretchLastSection(False)
+
+    def _restore_selected_source_row(self, row_index: int) -> None:
+        source_index = self.table_model.index(row_index, 0)
+        if not source_index.isValid():
+            self._refresh_current_selection()
+            return
+        proxy_index = self.proxy_model.mapFromSource(source_index)
+        if proxy_index.isValid():
+            self.table_view.selectRow(proxy_index.row())
+            self.table_view.scrollTo(proxy_index)
+        else:
+            self._refresh_current_selection()
+
+    def _sync_filter_patterns_with_visible_columns(self) -> None:
+        visible_headers = set(self.table_model.visible_headers)
+        self.filter_patterns = {
+            header: pattern
+            for header, pattern in self.filter_patterns.items()
+            if header in visible_headers
+        }
+
+    def _apply_filter_patterns(self) -> None:
+        self.proxy_model.clear_filters()
+        for index, header in enumerate(self.table_model.visible_headers):
+            self.proxy_model.set_filter_pattern(index, self.filter_patterns.get(header, ""))
 
     def _set_document_modified(self, modified: bool) -> None:
         self._document_modified = modified

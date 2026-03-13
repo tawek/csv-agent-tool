@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -104,11 +106,18 @@ class FilterDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, config: AppConfig, parent=None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        current_headers: list[str] | None = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.resize(720, 640)
-        self._config = config
+        self._config = AppConfig.from_dict(config.to_dict())
+        self._current_headers = list(current_headers or [])
 
         root_layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -214,15 +223,83 @@ class SettingsDialog(QDialog):
         form.addRow("Write header", self.write_header_checkbox)
         layout.addLayout(form)
 
-        layout.addWidget(QLabel("Fields JSON"))
-        self.fields_edit = QPlainTextEdit(
-            json.dumps(
-                {key: asdict(value) for key, value in self._config.csv.fields.items()},
-                indent=2,
-            )
-        )
-        layout.addWidget(self.fields_edit)
+        columns_row = QHBoxLayout()
+        columns_row.addWidget(QLabel("Columns"))
+        self.reset_columns_button = QPushButton("Reset From Current CSV")
+        self.reset_columns_button.setEnabled(bool(self._current_headers))
+        self.reset_columns_button.clicked.connect(self._reset_columns_from_current_csv)
+        columns_row.addStretch(1)
+        columns_row.addWidget(self.reset_columns_button)
+        layout.addLayout(columns_row)
+
+        self.fields_table = QTableWidget(0, 3)
+        self.fields_table.setHorizontalHeaderLabels(["Header", "Visible", "Label"])
+        self.fields_table.verticalHeader().setVisible(False)
+        self.fields_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.fields_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._populate_fields_table()
+        self.fields_table.resizeColumnsToContents()
+        layout.addWidget(self.fields_table)
         self.tabs.addTab(tab, "CSV")
+
+    def _field_rows(self) -> list[tuple[str, FieldConfig]]:
+        rows: list[tuple[str, FieldConfig]] = []
+        seen: set[str] = set()
+        for header in self._current_headers:
+            config = self._config.csv.fields.get(header, FieldConfig(label=header, show=True))
+            rows.append((header, config))
+            seen.add(header)
+        for header, config in self._config.csv.fields.items():
+            if header not in seen:
+                rows.append((header, config))
+        return rows
+
+    def _populate_fields_table(self) -> None:
+        rows = self._field_rows()
+        self.fields_table.setRowCount(len(rows))
+        for row_index, (header, field_config) in enumerate(rows):
+            header_item = QTableWidgetItem(header)
+            header_item.setFlags(header_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.fields_table.setItem(row_index, 0, header_item)
+
+            visible_item = QTableWidgetItem()
+            visible_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            visible_item.setCheckState(
+                Qt.CheckState.Checked if field_config.show else Qt.CheckState.Unchecked
+            )
+            self.fields_table.setItem(row_index, 1, visible_item)
+
+            label_item = QTableWidgetItem(field_config.label or header)
+            self.fields_table.setItem(row_index, 2, label_item)
+
+    def _reset_columns_from_current_csv(self) -> None:
+        if not self._current_headers:
+            return
+        self._config.csv.fields = {
+            header: FieldConfig(label=header, show=True) for header in self._current_headers
+        }
+        self._populate_fields_table()
+        self.fields_table.resizeColumnsToContents()
+
+    def _collect_fields(self) -> dict[str, FieldConfig]:
+        fields: dict[str, FieldConfig] = {}
+        for row_index in range(self.fields_table.rowCount()):
+            header_item = self.fields_table.item(row_index, 0)
+            visible_item = self.fields_table.item(row_index, 1)
+            label_item = self.fields_table.item(row_index, 2)
+            if header_item is None or visible_item is None:
+                continue
+            header = header_item.text()
+            label = label_item.text().strip() if label_item is not None else header
+            fields[header] = FieldConfig(
+                label=label or header,
+                show=visible_item.checkState() == Qt.CheckState.Checked,
+            )
+        return fields
 
     def _parse_json(self, text: str, field_name: str) -> dict[str, Any]:
         text = text.strip()
@@ -245,11 +322,7 @@ class SettingsDialog(QDialog):
         self.accept()
 
     def get_config(self) -> AppConfig:
-        csv_fields_raw = self._parse_json(self.fields_edit.toPlainText(), "Fields JSON")
-        csv_fields = {
-            key: FieldConfig.from_dict(value if isinstance(value, dict) else {})
-            for key, value in csv_fields_raw.items()
-        }
+        csv_fields = self._collect_fields()
         config = AppConfig.from_dict(
             {
                 "provider": {
