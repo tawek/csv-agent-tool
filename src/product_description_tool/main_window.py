@@ -1,0 +1,563 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtCore import QThread, Qt
+from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QProgressDialog,
+    QPushButton,
+    QPlainTextEdit,
+    QSplitter,
+    QStatusBar,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
+)
+
+from product_description_tool.config import AppConfig, ConfigStore
+from product_description_tool.csv_repository import CsvDocument, CsvRepository
+from product_description_tool.dialogs import FilterDialog, HtmlEditorDialog, SettingsDialog
+from product_description_tool.filter_proxy import WildcardFilterProxyModel
+from product_description_tool.generation import GenerationService
+from product_description_tool.preview import HtmlPreview
+from product_description_tool.prompt_renderer import PromptTemplateError
+from product_description_tool.table_model import CsvTableModel
+from product_description_tool.worker import GenerationWorker
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, *, config_store: ConfigStore) -> None:
+        super().__init__()
+        self.setWindowTitle("Product Description Tool")
+        self.resize(1500, 960)
+
+        self.config_store = config_store
+        self.config = self.config_store.load()
+        self.csv_repository = CsvRepository()
+        self.generation_service = GenerationService()
+
+        self.document: CsvDocument | None = None
+        self.last_original_preview_html = ""
+        self.last_result_preview_html = ""
+        self._worker_thread: QThread | None = None
+        self._worker: GenerationWorker | None = None
+        self._progress_dialog: QProgressDialog | None = None
+        self.current_prompt_path: Path | None = None
+        self.current_csv_path: Path | None = None
+        self._document_modified = False
+        self.filter_patterns: dict[str, str] = {}
+
+        self.table_model = CsvTableModel()
+        self.proxy_model = WildcardFilterProxyModel()
+        self.proxy_model.setSourceModel(self.table_model)
+
+        self._build_ui()
+        self._refresh_table_from_document()
+        self._update_window_title()
+
+    def _build_ui(self) -> None:
+        self._build_menus()
+        central = QWidget()
+        root_layout = QVBoxLayout(central)
+        root_layout.setContentsMargins(12, 12, 12, 12)
+        root_layout.setSpacing(10)
+        self.setCentralWidget(central)
+
+        prompt_group = QGroupBox("System Prompt")
+        prompt_layout = QVBoxLayout(prompt_group)
+        self.prompt_path_label = QLabel("Prompt file: unsaved")
+        prompt_layout.addWidget(self.prompt_path_label)
+
+        self.prompt_edit = QPlainTextEdit()
+        self.prompt_edit.setPlaceholderText("Use placeholders like {{product_name}}")
+        prompt_layout.addWidget(self.prompt_edit)
+        root_layout.addWidget(prompt_group, 1)
+
+        table_group = QGroupBox("CSV Data")
+        table_layout = QVBoxLayout(table_group)
+
+        table_actions = QHBoxLayout()
+        self.filter_button = QPushButton("Filter")
+        self.filter_button.clicked.connect(self.open_filter_dialog)
+        table_actions.addWidget(self.filter_button)
+        table_actions.addStretch(1)
+        table_layout.addLayout(table_actions)
+
+        self.table_view = QTableView()
+        self.table_view.setModel(self.proxy_model)
+        self.table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.table_view.setSortingEnabled(False)
+        self.table_view.selectionModel().selectionChanged.connect(self.on_selection_changed)
+        table_layout.addWidget(self.table_view, 1)
+        root_layout.addWidget(table_group, 3)
+
+        action_row = QHBoxLayout()
+        self.preview_button = QPushButton("Preview Selected")
+        self.preview_button.clicked.connect(self.preview_selected_row)
+        self.process_button = QPushButton("Process All")
+        self.process_button.clicked.connect(self.process_all_rows)
+        self.edit_original_button = QPushButton("Edit Original")
+        self.edit_original_button.clicked.connect(
+            lambda checked=False: self.edit_selected_description(self.config.csv.original_description)
+        )
+        self.edit_result_button = QPushButton("Edit Result")
+        self.edit_result_button.clicked.connect(
+            lambda checked=False: self.edit_selected_description(self.config.csv.result_description)
+        )
+        action_row.addWidget(self.preview_button)
+        action_row.addWidget(self.process_button)
+        action_row.addWidget(self.edit_original_button)
+        action_row.addWidget(self.edit_result_button)
+        action_row.addStretch(1)
+        root_layout.addLayout(action_row)
+
+        preview_splitter = QSplitter(Qt.Orientation.Horizontal)
+        original_group = QGroupBox("Original Description")
+        original_layout = QVBoxLayout(original_group)
+        self.original_preview = HtmlPreview()
+        original_layout.addWidget(self.original_preview)
+
+        result_group = QGroupBox("Produced Description")
+        result_layout = QVBoxLayout(result_group)
+        self.result_preview = HtmlPreview()
+        result_layout.addWidget(self.result_preview)
+
+        preview_splitter.addWidget(original_group)
+        preview_splitter.addWidget(result_group)
+        preview_splitter.setSizes([1, 1])
+        root_layout.addWidget(preview_splitter, 2)
+
+        self.status = QStatusBar()
+        self.setStatusBar(self.status)
+        self.status.showMessage("Ready")
+
+    def _build_menus(self) -> None:
+        menu_bar = self.menuBar()
+
+        file_menu = menu_bar.addMenu("File")
+        exit_action = QAction("Exit", self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        csv_menu = menu_bar.addMenu("CSV")
+        self.load_csv_action = QAction("Load", self)
+        self.load_csv_action.triggered.connect(self.load_csv)
+        self.store_csv_action = QAction("Store", self)
+        self.store_csv_action.triggered.connect(self.save_csv)
+        self.store_csv_as_action = QAction("Store As", self)
+        self.store_csv_as_action.triggered.connect(lambda checked=False: self.save_csv(save_as=True))
+        csv_menu.addActions([self.load_csv_action, self.store_csv_action, self.store_csv_as_action])
+
+        prompt_menu = menu_bar.addMenu("Prompt")
+        self.load_prompt_action = QAction("Load", self)
+        self.load_prompt_action.triggered.connect(self.load_prompt)
+        self.store_prompt_action = QAction("Store", self)
+        self.store_prompt_action.triggered.connect(self.save_prompt)
+        self.store_prompt_as_action = QAction("Store As", self)
+        self.store_prompt_as_action.triggered.connect(
+            lambda checked=False: self.save_prompt(save_as=True)
+        )
+        prompt_menu.addActions(
+            [self.load_prompt_action, self.store_prompt_action, self.store_prompt_as_action]
+        )
+
+        edit_menu = menu_bar.addMenu("Edit")
+        self.settings_action = QAction("Settings", self)
+        self.settings_action.triggered.connect(self.open_settings)
+        self.edit_original_action = QAction("Original", self)
+        self.edit_original_action.setShortcut(QKeySequence("Ctrl+O"))
+        self.edit_original_action.triggered.connect(
+            lambda checked=False: self.edit_selected_description(self.config.csv.original_description)
+        )
+        self.edit_result_action = QAction("Result", self)
+        self.edit_result_action.setShortcut(QKeySequence("Ctrl+R"))
+        self.edit_result_action.triggered.connect(
+            lambda checked=False: self.edit_selected_description(self.config.csv.result_description)
+        )
+        edit_menu.addActions([self.settings_action, self.edit_original_action, self.edit_result_action])
+
+        process_menu = menu_bar.addMenu("Process")
+        self.process_all_action = QAction("All", self)
+        self.process_all_action.setShortcut(QKeySequence("Ctrl+P"))
+        self.process_all_action.triggered.connect(self.process_all_rows)
+        self.process_current_action = QAction("Current", self)
+        self.process_current_action.setShortcut(QKeySequence("Ctrl+Enter"))
+        self.process_current_action.triggered.connect(self.preview_selected_row)
+        process_menu.addActions([self.process_all_action, self.process_current_action])
+
+    def _refresh_table_from_document(self) -> None:
+        self.table_model.set_document(self.document, self.config.csv)
+        self.proxy_model.clear_filters()
+        self.filter_patterns = {}
+        self.table_view.resizeColumnsToContents()
+        if self.proxy_model.rowCount() > 0:
+            self.table_view.selectRow(0)
+        else:
+            self._update_previews("", "")
+        self._update_filter_button_text()
+
+    def open_settings(self) -> None:
+        dialog = SettingsDialog(self.config, self)
+        if dialog.exec():
+            self.config = dialog.get_config()
+            self.config_store.save(self.config)
+            self.table_model.update_config(self.config.csv)
+            self.proxy_model.clear_filters()
+            self.filter_patterns = {}
+            self._ensure_result_column()
+            self.table_view.resizeColumnsToContents()
+            self._update_filter_button_text()
+            self._refresh_current_selection()
+
+    def load_prompt(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Prompt",
+            "",
+            "Text Files (*.txt *.md *.prompt);;All Files (*)",
+        )
+        if not path:
+            return
+        self.current_prompt_path = Path(path)
+        self.prompt_edit.setPlainText(Path(path).read_text(encoding="utf-8"))
+        self._update_prompt_path_label()
+
+    def save_prompt(self, save_as: bool = False) -> None:
+        target_path = self.current_prompt_path if not save_as else None
+        if target_path is None:
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Prompt",
+                str(self.current_prompt_path or ""),
+                "Text Files (*.txt *.md *.prompt);;All Files (*)",
+            )
+            if not path:
+                return
+            target_path = Path(path)
+        target_path.write_text(self.prompt_edit.toPlainText(), encoding="utf-8")
+        self.current_prompt_path = target_path
+        self._update_prompt_path_label()
+        self.status.showMessage(f"Saved prompt to {target_path}")
+
+    def load_csv(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open CSV",
+            str(self.current_csv_path.parent if self.current_csv_path else ""),
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if not path:
+            return
+        try:
+            self.document = self.csv_repository.load(path, self.config.csv)
+            self._ensure_result_column()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Load failed", str(exc))
+            return
+
+        self.current_csv_path = Path(path)
+        self._set_document_modified(False)
+        self._refresh_table_from_document()
+        self.status.showMessage(f"Loaded {len(self.document.rows)} rows from {path}")
+
+    def save_csv(self, save_as: bool = False) -> None:
+        if self.document is None:
+            QMessageBox.warning(self, "Nothing to save", "Load a CSV file first.")
+            return
+        target_path = None if save_as else self.current_csv_path
+        if target_path is None:
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save CSV",
+                str(self.current_csv_path or ""),
+                "CSV Files (*.csv);;All Files (*)",
+            )
+            if not path:
+                return
+            target_path = Path(path)
+        try:
+            self.csv_repository.save(target_path, self.document, self.config.csv)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Save failed", str(exc))
+            return
+        self.current_csv_path = target_path
+        self._set_document_modified(False)
+        self.status.showMessage(f"Saved CSV to {target_path}")
+
+    def _ensure_result_column(self) -> None:
+        if self.document is None:
+            return
+        self.csv_repository.ensure_column(self.document, self.config.csv.result_description)
+
+    def _validate_ready_for_generation(self) -> bool:
+        if self.document is None:
+            QMessageBox.warning(self, "No data", "Load a CSV file first.")
+            return False
+        original_column = self.config.csv.original_description
+        if original_column not in self.document.headers:
+            QMessageBox.warning(
+                self,
+                "Missing column",
+                f"Original description column '{original_column}' was not found in the CSV.",
+            )
+            return False
+        try:
+            self.generation_service.validate_template(
+                self.prompt_edit.toPlainText(),
+                self.document.headers,
+            )
+        except PromptTemplateError as exc:
+            QMessageBox.critical(
+                self,
+                "Invalid prompt template",
+                "\n".join(["Unknown placeholders:"] + exc.missing_fields),
+            )
+            return False
+        return True
+
+    def _selected_source_row(self) -> int | None:
+        index = self.table_view.currentIndex()
+        if not index.isValid():
+            return None
+        return self.proxy_model.mapToSource(index).row()
+
+    def preview_selected_row(self) -> None:
+        if not self._validate_ready_for_generation():
+            return
+        row_index = self._selected_source_row()
+        if row_index is None:
+            QMessageBox.warning(self, "No selection", "Select a row to preview.")
+            return
+        self._start_worker(selected_row=row_index, show_progress=False)
+
+    def process_all_rows(self) -> None:
+        if not self._validate_ready_for_generation():
+            return
+        self._start_worker(selected_row=None, show_progress=True)
+
+    def _start_worker(self, *, selected_row: int | None, show_progress: bool) -> None:
+        if self.document is None:
+            return
+        self._set_busy(True)
+        worker = GenerationWorker(
+            service=self.generation_service,
+            rows=self.document.rows,
+            template=self.prompt_edit.toPlainText(),
+            config=self.config,
+            selected_row=selected_row,
+        )
+        thread = QThread(self)
+        self._worker = worker
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.row_generated.connect(self._handle_row_generated)
+        worker.failed.connect(self._handle_worker_failed)
+        worker.completed.connect(self._handle_worker_completed)
+        worker.cancelled.connect(self._handle_worker_cancelled)
+        worker.progress.connect(self._handle_progress)
+        worker.completed.connect(thread.quit)
+        worker.cancelled.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_worker_state)
+        self._worker_thread = thread
+        thread.start()
+        if selected_row is None:
+            self.status.showMessage("Processing all rows...")
+            if show_progress:
+                self._show_progress_dialog(len(self.document.rows))
+        else:
+            self.status.showMessage(f"Previewing row {selected_row + 1}...")
+
+    def _handle_row_generated(self, row_index: int, content: str) -> None:
+        if self.document is None:
+            return
+        existing = self.document.rows[row_index].get(self.config.csv.result_description, "")
+        self.document.rows[row_index][self.config.csv.result_description] = content
+        self.table_model.refresh_row(row_index)
+        if existing != content:
+            self._set_document_modified(True)
+        selected = self._selected_source_row()
+        if selected == row_index:
+            original = self.document.rows[row_index].get(self.config.csv.original_description, "")
+            self._update_previews(original, content)
+
+    def _handle_worker_failed(self, message: str) -> None:
+        self._close_progress_dialog()
+        self._set_busy(False)
+        self.status.showMessage("Generation failed")
+        QMessageBox.critical(self, "Generation failed", message)
+
+    def _handle_worker_completed(self) -> None:
+        self._close_progress_dialog()
+        self._set_busy(False)
+        self.status.showMessage("Generation finished")
+
+    def _handle_worker_cancelled(self) -> None:
+        self._close_progress_dialog()
+        self._set_busy(False)
+        self.status.showMessage("Processing cancelled")
+
+    def _handle_progress(self, completed: int, total: int) -> None:
+        dialog = self._progress_dialog
+        if dialog is None:
+            return
+        dialog.setMaximum(total)
+        dialog.setValue(completed)
+        dialog.setLabelText(f"Processed {completed} of {total} rows")
+
+    def _show_progress_dialog(self, total_rows: int) -> None:
+        dialog = QProgressDialog("Processed 0 rows", "Cancel", 0, total_rows, self)
+        dialog.setWindowTitle("Processing")
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.canceled.connect(self._cancel_processing)
+        self._progress_dialog = dialog
+        dialog.show()
+
+    def _close_progress_dialog(self) -> None:
+        if self._progress_dialog is None:
+            return
+        self._progress_dialog.close()
+        self._progress_dialog.deleteLater()
+        self._progress_dialog = None
+
+    def _cancel_processing(self) -> None:
+        if self._worker is not None:
+            self._worker.cancel()
+
+    def _clear_worker_state(self) -> None:
+        self._worker = None
+        self._worker_thread = None
+
+    def _set_busy(self, busy: bool) -> None:
+        for button in [
+            self.filter_button,
+            self.preview_button,
+            self.process_button,
+            self.edit_original_button,
+            self.edit_result_button,
+        ]:
+            button.setEnabled(not busy)
+        for action in [
+            self.load_csv_action,
+            self.store_csv_action,
+            self.store_csv_as_action,
+            self.load_prompt_action,
+            self.store_prompt_action,
+            self.store_prompt_as_action,
+            self.settings_action,
+            self.edit_original_action,
+            self.edit_result_action,
+            self.process_all_action,
+            self.process_current_action,
+        ]:
+            action.setEnabled(not busy)
+
+    def on_selection_changed(self) -> None:
+        self._refresh_current_selection()
+
+    def _refresh_current_selection(self) -> None:
+        if self.document is None:
+            self._update_previews("", "")
+            return
+        row_index = self._selected_source_row()
+        if row_index is None:
+            self._update_previews("", "")
+            return
+        row = self.document.rows[row_index]
+        self._update_previews(
+            row.get(self.config.csv.original_description, ""),
+            row.get(self.config.csv.result_description, ""),
+        )
+
+    def _update_previews(self, original_html: str, result_html: str) -> None:
+        self.last_original_preview_html = original_html
+        self.last_result_preview_html = result_html
+        self.original_preview.set_html(original_html)
+        self.result_preview.set_html(result_html)
+
+    def edit_selected_description(self, column_name: str) -> None:
+        if self.document is None:
+            QMessageBox.warning(self, "No data", "Load a CSV file first.")
+            return
+        row_index = self._selected_source_row()
+        if row_index is None:
+            QMessageBox.warning(self, "No selection", "Select a row first.")
+            return
+        self.csv_repository.ensure_column(self.document, column_name)
+        row = self.document.rows[row_index]
+        dialog = HtmlEditorDialog(
+            title=f"Edit {column_name}",
+            text=row.get(column_name, ""),
+            parent=self,
+        )
+        if dialog.exec():
+            new_text = dialog.text()
+            if self.document.rows[row_index].get(column_name, "") != new_text:
+                self._set_document_modified(True)
+            self.document.rows[row_index][column_name] = new_text
+            self.table_model.refresh_row(row_index)
+            self._refresh_current_selection()
+
+    def open_filter_dialog(self) -> None:
+        column_labels = [
+            (
+                header,
+                str(
+                    self.table_model.headerData(
+                        index,
+                        Qt.Orientation.Horizontal,
+                        Qt.ItemDataRole.DisplayRole,
+                    )
+                ),
+            )
+            for index, header in enumerate(self.table_model.visible_headers)
+        ]
+        dialog = FilterDialog(
+            column_labels=column_labels,
+            current_filters=self.filter_patterns,
+            parent=self,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.filter_patterns = dialog.filters()
+            self.proxy_model.clear_filters()
+            for index, header in enumerate(self.table_model.visible_headers):
+                self.proxy_model.set_filter_pattern(index, self.filter_patterns.get(header, ""))
+            self._update_filter_button_text()
+
+    def _update_filter_button_text(self) -> None:
+        active_count = len(self.filter_patterns)
+        if active_count:
+            self.filter_button.setText(f"Filter ({active_count})")
+        else:
+            self.filter_button.setText("Filter")
+
+    def _update_prompt_path_label(self) -> None:
+        if self.current_prompt_path is None:
+            self.prompt_path_label.setText("Prompt file: unsaved")
+        else:
+            self.prompt_path_label.setText(f"Prompt file: {self.current_prompt_path}")
+
+    def _set_document_modified(self, modified: bool) -> None:
+        self._document_modified = modified
+        self.setWindowModified(modified)
+        self._update_window_title()
+
+    def _update_window_title(self) -> None:
+        if self.current_csv_path is None:
+            self.setWindowTitle("Product Description Tool[*]")
+            return
+        self.setWindowTitle(f"{self.current_csv_path}[*] - Product Description Tool")

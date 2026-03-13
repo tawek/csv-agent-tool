@@ -1,0 +1,40 @@
+[project]
+name = "product-description-tool"
+version = "0.1.0"
+description = "Desktop batch editor for rewriting product descriptions with local or remote LLMs."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+  "httpx>=0.28.1",
+  "openai>=2.0.0",
+  "platformdirs>=4.3.6",
+  "PySide6>=6.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pyinstaller>=6.16.0",
+  "pytest>=8.4.1",
+  "pytest-qt>=4.5.0",
+]
+
+[project.scripts]
+product-description-tool = "product_description_tool.__main__:main"
+
+[build-system]
+requires = ["setuptools>=80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra"
+testpaths = ["tests"]
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]
