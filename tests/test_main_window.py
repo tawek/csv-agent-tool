@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QGroupBox
 
 from product_description_tool.collapsible_panel import CollapsiblePanel
 from product_description_tool.config import AppConfig, ConfigStore, FieldConfig
+from product_description_tool.generation import USER_PROMPT
 from product_description_tool.main_window import MainWindow
 
 
@@ -25,15 +26,27 @@ class FakeGenerationService:
     def validate_template(self, template: str, headers: list[str]) -> None:
         return None
 
-    def process_row(self, *, row_index, row, template, config):
+    def process_row(self, *, row_index, row, template, config, on_chunk=None, should_cancel=None):
         class Result:
             def __init__(self, row_index: int, content: str) -> None:
                 self.row_index = row_index
                 self.content = content
 
-        return Result(row_index, f"<p>preview-{row['sku']}</p>")
+        content = f"<p>preview-{row['sku']}</p>"
+        if on_chunk is not None:
+            on_chunk(row_index, content)
+        return Result(row_index, content)
 
-    def process_rows(self, *, rows, template, config, on_result=None, should_cancel=None):
+    def process_rows(
+        self,
+        *,
+        rows,
+        template,
+        config,
+        on_result=None,
+        on_chunk=None,
+        should_cancel=None,
+    ):
         results = []
         for index, row in enumerate(rows):
             if should_cancel is not None and should_cancel():
@@ -44,8 +57,12 @@ class FakeGenerationService:
                 row=row,
                 template=template,
                 config=config,
+                on_chunk=None,
+                should_cancel=should_cancel,
             )
             result.content = content
+            if on_chunk is not None:
+                on_chunk(index, content)
             results.append(result)
             if on_result is not None:
                 on_result(result)
@@ -53,7 +70,16 @@ class FakeGenerationService:
 
 
 class SlowCancellableGenerationService(FakeGenerationService):
-    def process_rows(self, *, rows, template, config, on_result=None, should_cancel=None):
+    def process_rows(
+        self,
+        *,
+        rows,
+        template,
+        config,
+        on_result=None,
+        on_chunk=None,
+        should_cancel=None,
+    ):
         results = []
         for index, row in enumerate(rows):
             QThread.msleep(50)
@@ -64,8 +90,12 @@ class SlowCancellableGenerationService(FakeGenerationService):
                 row=row,
                 template=template,
                 config=config,
+                on_chunk=None,
+                should_cancel=should_cancel,
             )
             result.content = f"<p>batch-{row['sku']}</p>"
+            if on_chunk is not None:
+                on_chunk(index, result.content)
             results.append(result)
             if on_result is not None:
                 on_result(result)
@@ -191,6 +221,11 @@ def test_preview_selected_updates_only_current_row(qtbot, tmp_path: Path, monkey
     window.table_view.selectRow(1)
     window.preview_selected_row()
 
+    assert window._activity_dialog is not None
+    assert window._activity_dialog.record_progress_bar.maximum() == 1
+    expected_input_chars = len("Rewrite B-2") + len(USER_PROMPT)
+    assert str(expected_input_chars) in window._activity_dialog.input_stats_label.text()
+
     qtbot.waitUntil(lambda: window.document.rows[1]["generated"] == "<p>preview-B-2</p>")
     assert window.document.rows[0]["generated"] == "<p>Existing</p>"
 
@@ -207,6 +242,8 @@ def test_process_all_overwrites_every_row(qtbot, tmp_path: Path, monkeypatch) ->
 
     window.process_all_rows()
 
+    assert window._activity_dialog is not None
+    assert window._activity_dialog.record_progress_bar.maximum() == 2
     qtbot.waitUntil(lambda: window.document.rows[1]["generated"] == "<p>batch-B-2</p>")
     assert window.document.rows[0]["generated"] == "<p>batch-A-1</p>"
 
@@ -256,7 +293,7 @@ def test_cancel_batch_processing_stops_before_all_rows_finish(qtbot, tmp_path: P
     window.prompt_edit.setPlainText("Rewrite {{sku}}")
 
     window.process_all_rows()
-    qtbot.waitUntil(lambda: window._progress_dialog is not None)
+    qtbot.waitUntil(lambda: window._activity_dialog is not None)
     qtbot.waitUntil(lambda: window.document.rows[0]["generated"] == "<p>batch-A-1</p>")
 
     window._cancel_processing()

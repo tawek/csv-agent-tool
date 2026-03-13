@@ -4,8 +4,8 @@ import json
 from dataclasses import asdict
 from typing import Any
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextDocument
+from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QCloseEvent, QPainter, QTextDocument
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -32,7 +33,176 @@ from product_description_tool.config import (
     CsvConfig,
     FieldConfig,
 )
+from product_description_tool.generation import estimate_tokens_from_chars
 from product_description_tool.highlighter import HtmlSyntaxHighlighter
+
+
+class SpinnerWidget(QWidget):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._angle = 0
+        self._timer = QTimer(self)
+        self._timer.setInterval(100)
+        self._timer.timeout.connect(self._advance)
+        self._timer.start()
+        self.setMinimumSize(28, 28)
+
+    def _advance(self) -> None:
+        self._angle = (self._angle + 30) % 360
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: ANN001
+        del event
+        side = min(self.width(), self.height())
+        radius = side / 2 - 3
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.translate(self.rect().center())
+        base = self.palette().color(self.foregroundRole())
+        for index in range(12):
+            color = QColor(base)
+            color.setAlphaF((index + 1) / 12)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(color)
+            painter.save()
+            painter.rotate(self._angle - index * 30)
+            painter.translate(0, -radius)
+            painter.drawRoundedRect(-2, -4, 4, 8, 2, 2)
+            painter.restore()
+
+
+class ActivityDialog(QDialog):
+    cancel_requested = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setModal(True)
+        self.resize(520, 260)
+
+        self._elapsed_seconds = 0
+        self._allow_close = False
+        self._cancel_requested = False
+        self._timer = QTimer(self)
+        self._timer.setInterval(1000)
+        self._timer.timeout.connect(self._tick)
+
+        layout = QVBoxLayout(self)
+
+        header = QHBoxLayout()
+        self.spinner = SpinnerWidget()
+        header.addWidget(self.spinner, alignment=Qt.AlignmentFlag.AlignTop)
+
+        title_column = QVBoxLayout()
+        self.title_label = QLabel("Processing")
+        title_font = self.title_label.font()
+        title_font.setBold(True)
+        self.title_label.setFont(title_font)
+        self.status_label = QLabel("Working...")
+        title_column.addWidget(self.title_label)
+        title_column.addWidget(self.status_label)
+        header.addLayout(title_column, 1)
+
+        elapsed_column = QVBoxLayout()
+        elapsed_column.addWidget(QLabel("Elapsed"), alignment=Qt.AlignmentFlag.AlignRight)
+        self.elapsed_label = QLabel("0:00:00")
+        elapsed_font = self.elapsed_label.font()
+        elapsed_font.setBold(True)
+        self.elapsed_label.setFont(elapsed_font)
+        elapsed_column.addWidget(self.elapsed_label, alignment=Qt.AlignmentFlag.AlignRight)
+        header.addLayout(elapsed_column)
+        layout.addLayout(header)
+
+        self.record_label = QLabel("Records: 0 / 0")
+        layout.addWidget(self.record_label)
+
+        self.record_progress_bar = QProgressBar()
+        self.record_progress_bar.setTextVisible(True)
+        self.record_progress_bar.setRange(0, 1)
+        self.record_progress_bar.setValue(0)
+        layout.addWidget(self.record_progress_bar)
+
+        self.input_stats_label = QLabel("Input prompt: 0 chars (~0 tokens)")
+        self.output_stats_label = QLabel("Output: 0 chars (~0 tokens)")
+        layout.addWidget(self.input_stats_label)
+        layout.addWidget(self.output_stats_label)
+
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.request_cancel)
+        footer.addWidget(self.cancel_button)
+        layout.addLayout(footer)
+
+    def start_activity(
+        self,
+        *,
+        title: str,
+        status: str,
+        total_records: int,
+        input_chars: int,
+    ) -> None:
+        self._allow_close = False
+        self._cancel_requested = False
+        self._elapsed_seconds = 0
+        self.setWindowTitle(title)
+        self.title_label.setText(title)
+        self.status_label.setText(status)
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.setText("Cancel")
+        self.elapsed_label.setText("0:00:00")
+        self.set_record_progress(0, total_records)
+        self.set_input_stats(input_chars)
+        self.set_output_stats(0)
+        self._timer.start()
+        self.show()
+
+    def set_record_progress(self, completed: int, total: int) -> None:
+        total = max(total, 1)
+        self.record_label.setText(f"Records: {completed} / {total}")
+        self.record_progress_bar.setRange(0, total)
+        self.record_progress_bar.setValue(min(completed, total))
+
+    def set_input_stats(self, char_count: int) -> None:
+        tokens = estimate_tokens_from_chars(char_count)
+        self.input_stats_label.setText(f"Input prompt: {char_count:,} chars (~{tokens:,} tokens)")
+
+    def set_output_stats(self, char_count: int) -> None:
+        tokens = estimate_tokens_from_chars(char_count)
+        self.output_stats_label.setText(f"Output: {char_count:,} chars (~{tokens:,} tokens)")
+
+    def set_status(self, text: str) -> None:
+        self.status_label.setText(text)
+
+    def request_cancel(self) -> None:
+        if self._cancel_requested:
+            return
+        self._cancel_requested = True
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.setText("Cancelling...")
+        self.status_label.setText("Cancelling...")
+        self.cancel_requested.emit()
+
+    def close_activity(self) -> None:
+        self._timer.stop()
+        self._allow_close = True
+        self.close()
+        self.deleteLater()
+
+    def reject(self) -> None:
+        self.request_cancel()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if not self._allow_close:
+            event.ignore()
+            self.request_cancel()
+            return
+        super().closeEvent(event)
+
+    def _tick(self) -> None:
+        self._elapsed_seconds += 1
+        hours, remainder = divmod(self._elapsed_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        self.elapsed_label.setText(f"{hours}:{minutes:02}:{seconds:02}")
 
 
 class HtmlEditorDialog(QDialog):

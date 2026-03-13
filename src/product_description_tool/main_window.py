@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
-    QProgressDialog,
     QPushButton,
     QPlainTextEdit,
     QSplitter,
@@ -25,7 +24,12 @@ from PySide6.QtWidgets import (
 from product_description_tool.collapsible_panel import CollapsiblePanel
 from product_description_tool.config import AppConfig, ConfigStore
 from product_description_tool.csv_repository import CsvDocument, CsvRepository
-from product_description_tool.dialogs import FilterDialog, HtmlEditorDialog, SettingsDialog
+from product_description_tool.dialogs import (
+    ActivityDialog,
+    FilterDialog,
+    HtmlEditorDialog,
+    SettingsDialog,
+)
 from product_description_tool.filter_proxy import WildcardFilterProxyModel
 from product_description_tool.generation import GenerationService
 from product_description_tool.preview import HtmlPreview
@@ -50,7 +54,9 @@ class MainWindow(QMainWindow):
         self.last_result_preview_html = ""
         self._worker_thread: QThread | None = None
         self._worker: GenerationWorker | None = None
-        self._progress_dialog: QProgressDialog | None = None
+        self._activity_dialog: ActivityDialog | None = None
+        self._activity_output_chars = 0
+        self._activity_row_output_chars: dict[int, int] = {}
         self.current_prompt_path: Path | None = None
         self.current_csv_path: Path | None = None
         self._document_modified = False
@@ -373,16 +379,31 @@ class MainWindow(QMainWindow):
         if row_index is None:
             QMessageBox.warning(self, "No selection", "Select a row to preview.")
             return
-        self._start_worker(selected_row=row_index, show_progress=False)
+        self._start_worker(selected_row=row_index)
 
     def process_all_rows(self) -> None:
         if not self._validate_ready_for_generation():
             return
-        self._start_worker(selected_row=None, show_progress=True)
+        self._start_worker(selected_row=None)
 
-    def _start_worker(self, *, selected_row: int | None, show_progress: bool) -> None:
+    def _start_worker(self, *, selected_row: int | None) -> None:
         if self.document is None:
             return
+        total_records, input_chars = self._build_activity_summary(selected_row=selected_row)
+        title = "Preview" if selected_row is not None else "Processing"
+        status = (
+            f"Previewing row {selected_row + 1}..."
+            if selected_row is not None
+            else "Processing all rows..."
+        )
+        self._activity_output_chars = 0
+        self._activity_row_output_chars = {}
+        self._show_activity_dialog(
+            title=title,
+            status=status,
+            total_records=total_records,
+            input_chars=input_chars,
+        )
         self._set_busy(True)
         worker = GenerationWorker(
             service=self.generation_service,
@@ -396,6 +417,7 @@ class MainWindow(QMainWindow):
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.row_generated.connect(self._handle_row_generated)
+        worker.chunk_generated.connect(self._handle_chunk_generated)
         worker.failed.connect(self._handle_worker_failed)
         worker.completed.connect(self._handle_worker_completed)
         worker.cancelled.connect(self._handle_worker_cancelled)
@@ -410,14 +432,18 @@ class MainWindow(QMainWindow):
         thread.start()
         if selected_row is None:
             self.status.showMessage("Processing all rows...")
-            if show_progress:
-                self._show_progress_dialog(len(self.document.rows))
         else:
             self.status.showMessage(f"Previewing row {selected_row + 1}...")
 
     def _handle_row_generated(self, row_index: int, content: str) -> None:
         if self.document is None:
             return
+        streamed_chars = self._activity_row_output_chars.get(row_index, 0)
+        actual_chars = len(content)
+        if streamed_chars != actual_chars:
+            self._activity_output_chars += actual_chars - streamed_chars
+            self._activity_row_output_chars[row_index] = actual_chars
+            self._update_activity_output_stats()
         existing = self.document.rows[row_index].get(self.config.csv.result_description, "")
         self.document.rows[row_index][self.config.csv.result_description] = content
         self.table_model.refresh_row(row_index)
@@ -429,46 +455,66 @@ class MainWindow(QMainWindow):
             self._update_previews(original, content)
 
     def _handle_worker_failed(self, message: str) -> None:
-        self._close_progress_dialog()
+        self._close_activity_dialog()
         self._set_busy(False)
         self.status.showMessage("Generation failed")
         QMessageBox.critical(self, "Generation failed", message)
 
     def _handle_worker_completed(self) -> None:
-        self._close_progress_dialog()
+        self._close_activity_dialog()
         self._set_busy(False)
         self.status.showMessage("Generation finished")
 
     def _handle_worker_cancelled(self) -> None:
-        self._close_progress_dialog()
+        self._close_activity_dialog()
         self._set_busy(False)
         self.status.showMessage("Processing cancelled")
 
     def _handle_progress(self, completed: int, total: int) -> None:
-        dialog = self._progress_dialog
+        dialog = self._activity_dialog
         if dialog is None:
             return
-        dialog.setMaximum(total)
-        dialog.setValue(completed)
-        dialog.setLabelText(f"Processed {completed} of {total} rows")
-
-    def _show_progress_dialog(self, total_rows: int) -> None:
-        dialog = QProgressDialog("Processed 0 rows", "Cancel", 0, total_rows, self)
-        dialog.setWindowTitle("Processing")
-        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-        dialog.setMinimumDuration(0)
-        dialog.setAutoClose(False)
-        dialog.setAutoReset(False)
-        dialog.canceled.connect(self._cancel_processing)
-        self._progress_dialog = dialog
-        dialog.show()
-
-    def _close_progress_dialog(self) -> None:
-        if self._progress_dialog is None:
+        dialog.set_record_progress(completed, total)
+        if total == 1:
+            dialog.set_status("Waiting for model response..." if completed == 0 else "Finalizing preview...")
             return
-        self._progress_dialog.close()
-        self._progress_dialog.deleteLater()
-        self._progress_dialog = None
+        dialog.set_status(f"Processed {completed} of {total} rows")
+
+    def _handle_chunk_generated(self, row_index: int, chunk: str) -> None:
+        self._activity_row_output_chars[row_index] = (
+            self._activity_row_output_chars.get(row_index, 0) + len(chunk)
+        )
+        self._activity_output_chars += len(chunk)
+        dialog = self._activity_dialog
+        if dialog is not None:
+            dialog.set_status("Receiving output...")
+        self._update_activity_output_stats()
+
+    def _show_activity_dialog(
+        self,
+        *,
+        title: str,
+        status: str,
+        total_records: int,
+        input_chars: int,
+    ) -> None:
+        dialog = ActivityDialog(self)
+        dialog.cancel_requested.connect(self._cancel_processing)
+        dialog.start_activity(
+            title=title,
+            status=status,
+            total_records=total_records,
+            input_chars=input_chars,
+        )
+        self._activity_dialog = dialog
+
+    def _close_activity_dialog(self) -> None:
+        if self._activity_dialog is None:
+            return
+        self._activity_dialog.close_activity()
+        self._activity_dialog = None
+        self._activity_output_chars = 0
+        self._activity_row_output_chars = {}
 
     def _cancel_processing(self) -> None:
         if self._worker is not None:
@@ -501,6 +547,31 @@ class MainWindow(QMainWindow):
             self.process_current_action,
         ]:
             action.setEnabled(not busy)
+
+    def _build_activity_summary(self, *, selected_row: int | None) -> tuple[int, int]:
+        if self.document is None:
+            return (0, 0)
+        rows = (
+            [self.document.rows[selected_row]]
+            if selected_row is not None
+            else self.document.rows
+        )
+        prepare_prompt = getattr(self.generation_service, "prepare_prompt", None)
+        if prepare_prompt is None:
+            prepare_prompt = GenerationService().prepare_prompt
+        input_chars = sum(
+            prepare_prompt(
+                template=self.prompt_edit.toPlainText(),
+                row=row,
+            ).input_char_count
+            for row in rows
+        )
+        return (len(rows), input_chars)
+
+    def _update_activity_output_stats(self) -> None:
+        if self._activity_dialog is None:
+            return
+        self._activity_dialog.set_output_stats(self._activity_output_chars)
 
     def on_selection_changed(self) -> None:
         self._refresh_current_selection()
