@@ -28,8 +28,7 @@ class CsvRepository:
         source_path = Path(path)
         with source_path.open("r", encoding=config.encoding, newline=config.newline) as handle:
             text = handle.read()
-        dialect = self._detect_dialect(text)
-        effective = self._apply_overrides(dialect, config)
+        effective = self._dialect_from_config(config)
 
         reader = csv.DictReader(
             io.StringIO(text),
@@ -49,7 +48,7 @@ class CsvRepository:
         if config.result_description and config.result_description not in headers:
             headers.append(config.result_description)
 
-        effective = self._apply_overrides(document.dialect, config)
+        effective = self._dialect_from_config(config)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         with target_path.open(
             "w",
@@ -77,24 +76,9 @@ class CsvRepository:
         for row in document.rows:
             row.setdefault(column_name, "")
 
-    def _detect_dialect(self, text: str) -> CsvDialectSettings:
-        sample = text[:4096]
-        try:
-            sniffed = csv.Sniffer().sniff(sample)
-            return CsvDialectSettings(
-                delimiter=sniffed.delimiter,
-                quotechar=sniffed.quotechar,
-            )
-        except csv.Error:
-            return CsvDialectSettings()
-
-    def _apply_overrides(
-        self,
-        dialect: CsvDialectSettings,
-        config: CsvConfig,
-    ) -> CsvDialectSettings:
+    def _dialect_from_config(self, config: CsvConfig) -> CsvDialectSettings:
         return CsvDialectSettings(
-            delimiter=config.delimiter or dialect.delimiter,
-            quotechar=config.quotechar or dialect.quotechar,
-            lineterminator=config.newline or dialect.lineterminator,
+            delimiter=config.delimiter,
+            quotechar=config.quotechar,
+            lineterminator=config.newline or CsvDialectSettings().lineterminator,
         )

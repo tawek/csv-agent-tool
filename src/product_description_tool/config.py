@@ -23,8 +23,8 @@ class CsvConfig:
     original_description: str = "description"
     result_description: str = "generated_description"
     fields: dict[str, FieldConfig] = field(default_factory=dict)
-    delimiter: str | None = None
-    quotechar: str | None = None
+    delimiter: str = ","
+    quotechar: str = '"'
     encoding: str = "utf-8-sig"
     newline: str = ""
     write_header: bool = True
@@ -39,8 +39,8 @@ class CsvConfig:
             original_description=data.get("original-description", "description"),
             result_description=data.get("result-description", "generated_description"),
             fields=fields,
-            delimiter=data.get("delimiter"),
-            quotechar=data.get("quotechar"),
+            delimiter=data.get("delimiter", ",") or ",",
+            quotechar=data.get("quotechar", '"') or '"',
             encoding=data.get("encoding", "utf-8-sig"),
             newline=data.get("newline", ""),
             write_header=bool(data.get("write_header", True)),

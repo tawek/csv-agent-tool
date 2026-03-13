@@ -79,6 +79,8 @@ class FakeSettingsDialog:
             "description": FieldConfig(label="Product Description", show=True),
             "generated": FieldConfig(label="Generated", show=True),
         }
+        self._config.csv.delimiter = ";"
+        self._config.csv.quotechar = '"'
 
     def exec(self) -> bool:
         return True
@@ -270,3 +272,17 @@ def test_open_settings_updates_table_and_preserves_selected_row(qtbot, tmp_path:
     qtbot.waitUntil(lambda: window._selected_source_row() == 1)
     assert window.table_model.visible_headers == ["description", "generated"]
     assert window.table_model.headerData(0, Qt.Orientation.Horizontal) == "Product Description"
+
+
+def test_open_settings_persists_updated_config_on_ok(qtbot, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("product_description_tool.main_window.SettingsDialog", FakeSettingsDialog)
+    config_path = tmp_path / "config.json"
+
+    window = MainWindow(config_store=ConfigStore(config_path))
+    qtbot.addWidget(window)
+    window.open_settings()
+
+    persisted = ConfigStore(config_path).load()
+    assert persisted.csv.delimiter == ";"
+    assert persisted.csv.quotechar == '"'
+    assert persisted.csv.fields["description"].label == "Product Description"

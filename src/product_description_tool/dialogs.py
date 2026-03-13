@@ -207,8 +207,8 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         self.original_description_edit = QLineEdit(self._config.csv.original_description)
         self.result_description_edit = QLineEdit(self._config.csv.result_description)
-        self.delimiter_edit = QLineEdit(self._config.csv.delimiter or "")
-        self.quotechar_edit = QLineEdit(self._config.csv.quotechar or "")
+        self.delimiter_edit = QLineEdit(self._config.csv.delimiter)
+        self.quotechar_edit = QLineEdit(self._config.csv.quotechar)
         self.encoding_edit = QLineEdit(self._config.csv.encoding)
         self.newline_edit = QLineEdit(self._config.csv.newline)
         self.write_header_checkbox = QCheckBox()
@@ -216,8 +216,8 @@ class SettingsDialog(QDialog):
 
         form.addRow("Original description column", self.original_description_edit)
         form.addRow("Result description column", self.result_description_edit)
-        form.addRow("Delimiter override", self.delimiter_edit)
-        form.addRow("Quote char override", self.quotechar_edit)
+        form.addRow("Delimiter", self.delimiter_edit)
+        form.addRow("Quote char", self.quotechar_edit)
         form.addRow("Encoding", self.encoding_edit)
         form.addRow("Newline", self.newline_edit)
         form.addRow("Write header", self.write_header_checkbox)
@@ -321,6 +321,12 @@ class SettingsDialog(QDialog):
             return
         self.accept()
 
+    def _single_char_value(self, text: str, field_name: str, default: str) -> str:
+        value = text or default
+        if len(value) != 1:
+            raise ValueError(f"{field_name} must be a single character.")
+        return value
+
     def get_config(self) -> AppConfig:
         csv_fields = self._collect_fields()
         config = AppConfig.from_dict(
@@ -354,8 +360,16 @@ class SettingsDialog(QDialog):
                     "original-description": self.original_description_edit.text().strip(),
                     "result-description": self.result_description_edit.text().strip(),
                     "fields": {key: asdict(value) for key, value in csv_fields.items()},
-                    "delimiter": self.delimiter_edit.text() or None,
-                    "quotechar": self.quotechar_edit.text() or None,
+                    "delimiter": self._single_char_value(
+                        self.delimiter_edit.text(),
+                        "Delimiter",
+                        ",",
+                    ),
+                    "quotechar": self._single_char_value(
+                        self.quotechar_edit.text(),
+                        "Quote char",
+                        '"',
+                    ),
                     "encoding": self.encoding_edit.text().strip() or "utf-8-sig",
                     "newline": self.newline_edit.text(),
                     "write_header": self.write_header_checkbox.isChecked(),

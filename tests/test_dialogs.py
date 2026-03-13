@@ -37,3 +37,5 @@ def test_settings_dialog_collects_visibility_and_labels_from_table(qtbot) -> Non
 
     assert updated.csv.fields["sku"].show is False
     assert updated.csv.fields["description"].label == "Product Description"
+    assert updated.csv.delimiter == ","
+    assert updated.csv.quotechar == '"'

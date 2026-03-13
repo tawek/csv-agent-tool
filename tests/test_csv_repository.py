@@ -13,6 +13,8 @@ def test_loads_and_preserves_headers(tmp_path: Path) -> None:
 
     assert document.headers == ["sku", "description"]
     assert document.rows == [{"sku": "A-1", "description": "<p>Alpha</p>"}]
+    assert document.dialect.delimiter == ","
+    assert document.dialect.quotechar == '"'
 
 
 def test_save_adds_missing_result_column_and_honors_delimiter(tmp_path: Path) -> None:
@@ -51,3 +53,14 @@ def test_ensure_column_creates_empty_cells() -> None:
         {"sku": "A-1", "generated": ""},
         {"sku": "A-2", "generated": ""},
     ]
+
+
+def test_load_uses_configured_delimiter_instead_of_sniffing(tmp_path: Path) -> None:
+    csv_path = tmp_path / "products.csv"
+    csv_path.write_text('sku_description,"long_value"\nA-1,"<p>Alpha</p>"\n', encoding="utf-8")
+
+    repository = CsvRepository()
+    document = repository.load(csv_path, CsvConfig(encoding="utf-8"))
+
+    assert document.headers == ["sku_description", "long_value"]
+    assert document.rows == [{"sku_description": "A-1", "long_value": "<p>Alpha</p>"}]
