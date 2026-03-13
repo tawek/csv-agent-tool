@@ -163,7 +163,15 @@ class ConfigStore:
 
     def save(self, config: AppConfig) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        persisted = {
+            "provider": {
+                "active": config.provider.active,
+                "ollama": asdict(config.provider.ollama),
+                "openai": asdict(config.provider.openai),
+            },
+            "generation": asdict(config.generation),
+        }
         self.path.write_text(
-            json.dumps(config.to_dict(), indent=2, ensure_ascii=True),
+            json.dumps(persisted, indent=2, ensure_ascii=True),
             encoding="utf-8",
         )
