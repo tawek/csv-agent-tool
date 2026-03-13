@@ -376,7 +376,6 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         self.original_description_edit = QLineEdit(self._config.csv.original_description)
-        self.result_description_edit = QLineEdit(self._config.csv.result_description)
         self.delimiter_edit = QLineEdit(self._config.csv.delimiter)
         self.quotechar_edit = QLineEdit(self._config.csv.quotechar)
         self.encoding_edit = QLineEdit(self._config.csv.encoding)
@@ -385,7 +384,6 @@ class SettingsDialog(QDialog):
         self.write_header_checkbox.setChecked(self._config.csv.write_header)
 
         form.addRow("Original description column", self.original_description_edit)
-        form.addRow("Result description column", self.result_description_edit)
         form.addRow("Delimiter", self.delimiter_edit)
         form.addRow("Quote char", self.quotechar_edit)
         form.addRow("Encoding", self.encoding_edit)
@@ -528,7 +526,6 @@ class SettingsDialog(QDialog):
                 },
                 "csv": {
                     "original-description": self.original_description_edit.text().strip(),
-                    "result-description": self.result_description_edit.text().strip(),
                     "fields": {key: asdict(value) for key, value in csv_fields.items()},
                     "delimiter": self._single_char_value(
                         self.delimiter_edit.text(),

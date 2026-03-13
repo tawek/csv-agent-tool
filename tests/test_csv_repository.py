@@ -17,16 +17,15 @@ def test_loads_and_preserves_headers(tmp_path: Path) -> None:
     assert document.dialect.quotechar == '"'
 
 
-def test_save_adds_missing_result_column_and_honors_delimiter(tmp_path: Path) -> None:
+def test_save_preserves_existing_headers_and_honors_delimiter(tmp_path: Path) -> None:
     repository = CsvRepository()
     document = CsvDocument(
-        headers=["sku", "description"],
+        headers=["sku", "description", "generated"],
         rows=[{"sku": "A-1", "description": "<p>Alpha</p>", "generated": "<p>Beta</p>"}],
         dialect=CsvDialectSettings(delimiter=",", quotechar='"'),
     )
     config = CsvConfig(
         original_description="description",
-        result_description="generated",
         delimiter=";",
         encoding="utf-8",
     )

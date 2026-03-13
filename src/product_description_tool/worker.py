@@ -22,17 +22,15 @@ class GenerationWorker(QObject):
         self,
         *,
         service: GenerationService,
-        rows: list[dict[str, str]],
+        row_specs: list[tuple[int, dict[str, str]]],
         prompts: list[ProjectPrompt],
         config: AppConfig,
-        selected_row: int | None = None,
     ) -> None:
         super().__init__()
         self.service = service
-        self.rows = rows
+        self.row_specs = row_specs
         self.prompts = prompts
         self.config = config
-        self.selected_row = selected_row
         self._cancel_requested = threading.Event()
 
     def cancel(self) -> None:
@@ -47,37 +45,13 @@ class GenerationWorker(QObject):
                 return
 
             completed = [0]
-            if self.selected_row is None:
-                for prompt in self.prompts:
-                    self.service.process_rows(
-                        rows=self.rows,
-                        template=prompt.prompt,
-                        config=self.config,
-                        on_result=(
-                            lambda result, current_prompt=prompt: self._emit_result_with_progress(
-                                current_prompt.output_field,
-                                result,
-                                completed,
-                                total,
-                            )
-                        ),
-                        on_chunk=(
-                            lambda row_index, chunk, current_prompt=prompt: self._emit_chunk(
-                                row_index,
-                                current_prompt.output_field,
-                                chunk,
-                            )
-                        ),
-                        should_cancel=self._cancel_requested.is_set,
-                    )
+            for prompt in self.prompts:
+                for row_index, row in self.row_specs:
                     if self._cancel_requested.is_set():
                         self.cancelled.emit()
                         return
-            else:
-                row = self.rows[self.selected_row]
-                for prompt in self.prompts:
                     result = self.service.process_row(
-                        row_index=self.selected_row,
+                        row_index=row_index,
                         row=row,
                         template=prompt.prompt,
                         config=self.config,
@@ -91,9 +65,6 @@ class GenerationWorker(QObject):
                         should_cancel=self._cancel_requested.is_set,
                     )
                     self._emit_result_with_progress(prompt.output_field, result, completed, total)
-                    if self._cancel_requested.is_set():
-                        self.cancelled.emit()
-                        return
         except GenerationCancelled:
             self.cancelled.emit()
             return
@@ -120,5 +91,4 @@ class GenerationWorker(QObject):
         self.progress.emit(completed[0], total)
 
     def _total_operations(self) -> int:
-        row_count = 1 if self.selected_row is not None else len(self.rows)
-        return row_count * len(self.prompts)
+        return len(self.row_specs) * len(self.prompts)

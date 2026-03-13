@@ -45,8 +45,6 @@ class CsvRepository:
     def save(self, path: str | Path, document: CsvDocument, config: CsvConfig) -> None:
         target_path = Path(path)
         headers = list(document.headers)
-        if config.result_description and config.result_description not in headers:
-            headers.append(config.result_description)
 
         effective = self._dialect_from_config(config)
         target_path.parent.mkdir(parents=True, exist_ok=True)

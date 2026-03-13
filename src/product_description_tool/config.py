@@ -21,7 +21,7 @@ class FieldConfig:
 @dataclass(slots=True)
 class CsvConfig:
     original_description: str = "description"
-    result_description: str = "generated_description"
+    result_description: str = ""
     fields: dict[str, FieldConfig] = field(default_factory=dict)
     delimiter: str = ","
     quotechar: str = '"'
@@ -37,7 +37,7 @@ class CsvConfig:
         }
         return cls(
             original_description=data.get("original-description", "description"),
-            result_description=data.get("result-description", "generated_description"),
+            result_description=data.get("result-description", ""),
             fields=fields,
             delimiter=data.get("delimiter", ",") or ",",
             quotechar=data.get("quotechar", '"') or '"',

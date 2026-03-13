@@ -69,35 +69,16 @@ class FakeGenerationService:
 
 
 class SlowCancellableGenerationService(FakeGenerationService):
-    def process_rows(
-        self,
-        *,
-        rows,
-        template,
-        config,
-        on_result=None,
-        on_chunk=None,
-        should_cancel=None,
-    ):
-        results = []
-        for index, row in enumerate(rows):
-            QThread.msleep(50)
-            if should_cancel is not None and should_cancel():
-                break
-            result = self.process_row(
-                row_index=index,
-                row=row,
-                template=template,
-                config=config,
-                on_chunk=None,
-                should_cancel=should_cancel,
-            )
-            if on_chunk is not None:
-                on_chunk(index, result.content)
-            results.append(result)
-            if on_result is not None:
-                on_result(result)
-        return results
+    def process_row(self, *, row_index, row, template, config, on_chunk=None, should_cancel=None):
+        QThread.msleep(50)
+        return super().process_row(
+            row_index=row_index,
+            row=row,
+            template=template,
+            config=config,
+            on_chunk=on_chunk,
+            should_cancel=should_cancel,
+        )
 
 
 class FakeSettingsDialog:
@@ -167,18 +148,17 @@ def test_loading_and_selecting_row_updates_previews(qtbot, tmp_path: Path, monke
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-    window.project.csv.result_description = "generated"
 
     csv_path = _write_csv(tmp_path)
     _import_window_csv(window, monkeypatch, csv_path)
 
-    assert window.right_field_combo.currentText() == "generated"
+    assert window.right_field_combo.currentText() == "sku"
 
     window.table_view.selectRow(1)
     qtbot.waitUntil(lambda: window.last_original_preview_html == "<p>Beta 1</p>")
     qtbot.waitUntil(lambda: window.table_view.viewport().width() > 0)
 
-    assert window.last_result_preview_html == ""
+    assert window.last_result_preview_html == "B-2"
     assert "Files" not in [group.title() for group in window.findChildren(QGroupBox)]
     total_width = sum(window.table_view.columnWidth(index) for index in range(window.proxy_model.columnCount()))
     assert total_width <= window.table_view.viewport().width() + 4
@@ -188,7 +168,6 @@ def test_window_title_tracks_current_project_and_dirty_state(qtbot, tmp_path: Pa
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-    window.project.csv.result_description = "generated"
     csv_path = _write_csv(tmp_path)
     _import_window_csv(window, monkeypatch, csv_path)
 
@@ -215,7 +194,6 @@ def test_edit_selected_description_updates_model(qtbot, tmp_path: Path, monkeypa
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-    window.project.csv.result_description = "generated"
     csv_path = _write_csv(tmp_path)
     _import_window_csv(window, monkeypatch, csv_path)
 
@@ -229,7 +207,6 @@ def test_preview_selected_updates_only_current_prompt_field(qtbot, tmp_path: Pat
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-    window.project.csv.result_description = "generated"
     window.generation_service = FakeGenerationService()
     csv_path = _write_csv(tmp_path)
     _import_window_csv(window, monkeypatch, csv_path)
@@ -251,7 +228,6 @@ def test_process_all_runs_only_enabled_prompts(qtbot, tmp_path: Path, monkeypatc
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-    window.project.csv.result_description = "generated"
     window.generation_service = FakeGenerationService()
     csv_path = _write_csv(tmp_path)
     _import_window_csv(window, monkeypatch, csv_path)
@@ -267,11 +243,10 @@ def test_process_all_runs_only_enabled_prompts(qtbot, tmp_path: Path, monkeypatc
     assert window.document.rows[0]["generated_two"] == ""
 
 
-def test_filters_do_not_change_underlying_processing_scope(qtbot, tmp_path: Path, monkeypatch) -> None:
+def test_filters_limit_processing_scope_to_visible_rows(qtbot, tmp_path: Path, monkeypatch) -> None:
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-    window.project.csv.result_description = "generated"
     window.generation_service = FakeGenerationService()
     csv_path = _write_csv(tmp_path)
     _import_window_csv(window, monkeypatch, csv_path)
@@ -285,8 +260,9 @@ def test_filters_do_not_change_underlying_processing_scope(qtbot, tmp_path: Path
 
     window.process_all_rows()
 
-    qtbot.waitUntil(lambda: window.document.rows[1]["generated"] == "<p>Rewrite {{sku}}-B-2</p>")
+    qtbot.waitUntil(lambda: window.document.rows[0]["generated"] == "<p>Rewrite {{sku}}-A-1</p>")
     assert window.document.rows[0]["generated"] == "<p>Rewrite {{sku}}-A-1</p>"
+    assert window.document.rows[1]["generated"] == ""
     assert window.filter_button.text() == "Filter (1)"
 
 
@@ -294,7 +270,6 @@ def test_description_field_selector_reloads_preview(qtbot, tmp_path: Path, monke
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-    window.project.csv.result_description = "generated"
     csv_path = _write_csv(tmp_path)
     _import_window_csv(window, monkeypatch, csv_path)
 
@@ -307,7 +282,6 @@ def test_prompt_selection_updates_right_preview_field(qtbot, tmp_path: Path, mon
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-    window.project.csv.result_description = "generated"
     csv_path = _write_csv(tmp_path)
     _import_window_csv(window, monkeypatch, csv_path)
     _add_prompt(window, output_field="generated", prompt="First {{sku}}")
@@ -334,7 +308,6 @@ def test_cancel_batch_processing_stops_before_all_rows_finish(qtbot, tmp_path: P
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-    window.project.csv.result_description = "generated"
     window.generation_service = SlowCancellableGenerationService()
     csv_path = _write_csv(tmp_path, row_count=5)
     _import_window_csv(window, monkeypatch, csv_path)
@@ -357,7 +330,6 @@ def test_open_settings_updates_table_and_preserves_selected_row(qtbot, tmp_path:
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-    window.project.csv.result_description = "generated"
     csv_path = _write_csv(tmp_path)
     _import_window_csv(window, monkeypatch, csv_path)
     window.table_view.selectRow(1)
@@ -367,6 +339,48 @@ def test_open_settings_updates_table_and_preserves_selected_row(qtbot, tmp_path:
     qtbot.waitUntil(lambda: window._selected_source_row() == 1)
     assert window.table_model.visible_headers == ["description", "generated"]
     assert window.table_model.headerData(0, Qt.Orientation.Horizontal) == "Product Description"
+
+
+def test_new_window_does_not_add_default_generated_column(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window.document.headers == []
+    assert window.left_field_combo.count() == 0
+    assert window.right_field_combo.count() == 0
+
+
+def test_add_prompt_ensures_output_column_exists(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    _add_prompt(window, output_field="short_description", prompt="Short {{sku}}")
+
+    assert "short_description" in window.document.headers
+    assert "short_description" in window.table_model.visible_headers
+
+
+def test_generation_updates_table_for_non_default_output_field(qtbot, tmp_path: Path, monkeypatch) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    window.generation_service = FakeGenerationService()
+    csv_path = _write_csv(tmp_path)
+    _import_window_csv(window, monkeypatch, csv_path)
+    _add_prompt(window, output_field="short_description", prompt="Short {{sku}}")
+
+    window.preview_selected_row()
+
+    qtbot.waitUntil(
+        lambda: window.document.rows[0]["short_description"] == "<p>Short {{sku}}-A-1</p>"
+    )
+    column_index = window.table_model.visible_headers.index("short_description")
+    assert (
+        window.table_model.data(window.table_model.index(0, column_index))
+        == "<p>Short {{sku}}-A-1</p>"
+    )
 
 
 def test_main_window_uses_three_collapsible_panels_with_equal_initial_sizes(qtbot, tmp_path: Path) -> None:

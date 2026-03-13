@@ -256,12 +256,12 @@ class MainWindow(QMainWindow):
         self.edit_original_action = QAction("Original", self)
         self.edit_original_action.setShortcut(QKeySequence("Ctrl+O"))
         self.edit_original_action.triggered.connect(
-            lambda checked=False: self.edit_selected_description(self.project.csv.original_description)
+            lambda checked=False: self.edit_selected_description(self.left_field_combo.currentText())
         )
         self.edit_result_action = QAction("Result", self)
         self.edit_result_action.setShortcut(QKeySequence("Ctrl+R"))
         self.edit_result_action.triggered.connect(
-            lambda checked=False: self.edit_selected_description(self.project.csv.result_description)
+            lambda checked=False: self.edit_selected_description(self.right_field_combo.currentText())
         )
         edit_menu.addActions([self.settings_action, self.edit_original_action, self.edit_result_action])
 
@@ -536,7 +536,7 @@ class MainWindow(QMainWindow):
         if row_index is None:
             QMessageBox.warning(self, "No selection", "Select a row to preview.")
             return
-        self._start_worker(prompts=[prompt], selected_row=row_index)
+        self._start_worker(prompts=[prompt], row_specs=[(row_index, self.document.rows[row_index])])
 
     def process_all_rows(self) -> None:
         prompts = self._enabled_prompts()
@@ -545,7 +545,15 @@ class MainWindow(QMainWindow):
             return
         if not self._validate_ready_for_generation(prompts):
             return
-        self._start_worker(prompts=prompts, selected_row=None)
+        row_specs = self._visible_row_specs()
+        if not row_specs:
+            QMessageBox.warning(
+                self,
+                "No matching rows",
+                "No rows match the current table filter.",
+            )
+            return
+        self._start_worker(prompts=prompts, row_specs=row_specs)
 
     def _validate_ready_for_generation(self, prompts: list[ProjectPrompt]) -> bool:
         if not self.document.rows:
@@ -576,16 +584,21 @@ class MainWindow(QMainWindow):
                 return False
         return True
 
-    def _start_worker(self, *, prompts: list[ProjectPrompt], selected_row: int | None) -> None:
+    def _start_worker(
+        self,
+        *,
+        prompts: list[ProjectPrompt],
+        row_specs: list[tuple[int, dict[str, str]]],
+    ) -> None:
         total_records, input_chars = self._build_activity_summary(
             prompts=prompts,
-            selected_row=selected_row,
+            row_specs=row_specs,
         )
-        title = "Preview" if selected_row is not None else "Processing"
-        if selected_row is not None:
-            status = f"Previewing '{prompts[0].output_field}' for row {selected_row + 1}..."
+        title = "Preview" if len(row_specs) == 1 and len(prompts) == 1 else "Processing"
+        if len(row_specs) == 1 and len(prompts) == 1:
+            status = f"Previewing '{prompts[0].output_field}' for row {row_specs[0][0] + 1}..."
         else:
-            status = f"Processing {len(prompts)} prompt(s) across {len(self.document.rows)} row(s)..."
+            status = f"Processing {len(prompts)} prompt(s) across {len(row_specs)} row(s)..."
         self._activity_output_chars = 0
         self._activity_row_output_chars = {}
         self._show_activity_dialog(
@@ -597,10 +610,9 @@ class MainWindow(QMainWindow):
         self._set_busy(True)
         worker = GenerationWorker(
             service=self.generation_service,
-            rows=self.document.rows,
+            row_specs=row_specs,
             prompts=prompts,
             config=self._dialog_config(),
-            selected_row=selected_row,
         )
         thread = QThread(self)
         self._worker = worker
@@ -626,18 +638,17 @@ class MainWindow(QMainWindow):
         self,
         *,
         prompts: list[ProjectPrompt],
-        selected_row: int | None,
+        row_specs: list[tuple[int, dict[str, str]]],
     ) -> tuple[int, int]:
-        rows = [self.document.rows[selected_row]] if selected_row is not None else self.document.rows
         prepare_prompt = getattr(self.generation_service, "prepare_prompt", None)
         if prepare_prompt is None:
             prepare_prompt = GenerationService().prepare_prompt
         input_chars = sum(
             prepare_prompt(template=prompt.prompt, row=row).input_char_count
             for prompt in prompts
-            for row in rows
+            for _row_index, row in row_specs
         )
-        return (len(prompts) * len(rows), input_chars)
+        return (len(prompts) * len(row_specs), input_chars)
 
     def _handle_row_generated(self, row_index: int, output_field: str, content: str) -> None:
         streamed_chars = self._activity_row_output_chars.get((row_index, output_field), 0)
@@ -647,8 +658,7 @@ class MainWindow(QMainWindow):
             self._activity_row_output_chars[(row_index, output_field)] = actual_chars
             self._update_activity_output_stats()
         existing = self.document.rows[row_index].get(output_field, "")
-        self.document.rows[row_index][output_field] = content
-        self.table_model.refresh_row(row_index)
+        self.table_model.set_cell(row_index, output_field, content)
         if existing != content:
             self._set_project_modified(True)
         if self._selected_source_row() == row_index:
@@ -848,6 +858,18 @@ class MainWindow(QMainWindow):
             return None
         return self.proxy_model.mapToSource(index).row()
 
+    def _visible_row_specs(self) -> list[tuple[int, dict[str, str]]]:
+        row_specs: list[tuple[int, dict[str, str]]] = []
+        for proxy_row in range(self.proxy_model.rowCount()):
+            proxy_index = self.proxy_model.index(proxy_row, 0)
+            if not proxy_index.isValid():
+                continue
+            source_row = self.proxy_model.mapToSource(proxy_index).row()
+            if source_row < 0:
+                continue
+            row_specs.append((source_row, self.document.rows[source_row]))
+        return row_specs
+
     def _restore_selected_source_row(self, row_index: int) -> None:
         source_index = self.table_model.index(row_index, 0)
         if not source_index.isValid():
@@ -902,7 +924,7 @@ class MainWindow(QMainWindow):
         left_field: str,
     ) -> str:
         default_prompt_field = self.project.prompts[0].output_field if self.project.prompts else ""
-        candidates = [current_field, default_prompt_field, self.project.csv.result_description]
+        candidates = [current_field, default_prompt_field]
         for candidate in candidates:
             if candidate and candidate in headers:
                 return candidate
@@ -915,11 +937,7 @@ class MainWindow(QMainWindow):
         self.config.csv = CsvConfig.from_dict(self.project.csv.to_dict())
         for header in list(self.document.headers):
             self._ensure_field_config(header)
-        for required in [
-            self.project.csv.original_description,
-            self.project.csv.result_description,
-            *[prompt.output_field for prompt in self.project.prompts],
-        ]:
+        for required in [prompt.output_field for prompt in self.project.prompts]:
             self._ensure_column(required)
 
     def _ensure_column(self, column_name: str) -> None:
@@ -936,8 +954,6 @@ class MainWindow(QMainWindow):
     def _empty_document_for_project(self, project: Project) -> CsvDocument:
         headers: list[str] = []
         for header in [
-            project.csv.original_description,
-            project.csv.result_description,
             *project.csv.fields.keys(),
             *[prompt.output_field for prompt in project.prompts],
         ]:
