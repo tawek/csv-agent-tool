@@ -11,6 +11,7 @@ from product_description_tool.providers import GenerationCancelled
 
 
 class GenerationWorker(QObject):
+    prompt_started = Signal(int, str, int)
     row_generated = Signal(int, str, str)
     chunk_generated = Signal(int, str, str)
     completed = Signal()
@@ -55,6 +56,15 @@ class GenerationWorker(QObject):
                         row=row,
                         template=prompt.prompt,
                         config=self.config,
+                        on_prompt_ready=(
+                            lambda current_row_index, prompt_payload, current_prompt=prompt: (
+                                self._emit_prompt_started(
+                                    current_row_index,
+                                    current_prompt.output_field,
+                                    prompt_payload.input_char_count,
+                                )
+                            )
+                        ),
                         on_chunk=(
                             lambda row_index, chunk, current_prompt=prompt: self._emit_chunk(
                                 row_index,
@@ -75,6 +85,9 @@ class GenerationWorker(QObject):
 
     def _emit_chunk(self, row_index: int, output_field: str, chunk: str) -> None:
         self.chunk_generated.emit(row_index, output_field, chunk)
+
+    def _emit_prompt_started(self, row_index: int, output_field: str, input_chars: int) -> None:
+        self.prompt_started.emit(row_index, output_field, input_chars)
 
     def _emit_result(self, output_field: str, result: GenerationResult) -> None:
         self.row_generated.emit(result.row_index, output_field, result.content)

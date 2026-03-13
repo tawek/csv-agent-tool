@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
         self._activity_dialog: ActivityDialog | None = None
         self._activity_output_chars = 0
         self._activity_row_output_chars: dict[tuple[int, str], int] = {}
+        self._activity_current_key: tuple[int, str] | None = None
         self._busy = False
         self._project_modified = False
         self._updating_prompt_ui = False
@@ -601,6 +602,7 @@ class MainWindow(QMainWindow):
             status = f"Processing {len(prompts)} prompt(s) across {len(row_specs)} row(s)..."
         self._activity_output_chars = 0
         self._activity_row_output_chars = {}
+        self._activity_current_key = None
         self._show_activity_dialog(
             title=title,
             status=status,
@@ -618,6 +620,7 @@ class MainWindow(QMainWindow):
         self._worker = worker
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
+        worker.prompt_started.connect(self._handle_prompt_started)
         worker.row_generated.connect(self._handle_row_generated)
         worker.chunk_generated.connect(self._handle_chunk_generated)
         worker.failed.connect(self._handle_worker_failed)
@@ -640,22 +643,33 @@ class MainWindow(QMainWindow):
         prompts: list[ProjectPrompt],
         row_specs: list[tuple[int, dict[str, str]]],
     ) -> tuple[int, int]:
+        if not prompts or not row_specs:
+            return (0, 0)
         prepare_prompt = getattr(self.generation_service, "prepare_prompt", None)
         if prepare_prompt is None:
             prepare_prompt = GenerationService().prepare_prompt
-        input_chars = sum(
-            prepare_prompt(template=prompt.prompt, row=row).input_char_count
-            for prompt in prompts
-            for _row_index, row in row_specs
-        )
-        return (len(prompts) * len(row_specs), input_chars)
+        first_prompt = prepare_prompt(template=prompts[0].prompt, row=row_specs[0][1])
+        return (len(prompts) * len(row_specs), first_prompt.input_char_count)
+
+    def _handle_prompt_started(self, row_index: int, output_field: str, input_chars: int) -> None:
+        key = (row_index, output_field)
+        self._activity_current_key = key
+        self._activity_output_chars = 0
+        self._activity_row_output_chars = {key: 0}
+        dialog = self._activity_dialog
+        if dialog is None:
+            return
+        dialog.set_input_stats(input_chars)
+        dialog.set_output_stats(0)
+        dialog.set_status(f"Generating '{output_field}' for row {row_index + 1}...")
 
     def _handle_row_generated(self, row_index: int, output_field: str, content: str) -> None:
-        streamed_chars = self._activity_row_output_chars.get((row_index, output_field), 0)
+        key = (row_index, output_field)
+        streamed_chars = self._activity_row_output_chars.get(key, 0)
         actual_chars = len(content)
         if streamed_chars != actual_chars:
             self._activity_output_chars += actual_chars - streamed_chars
-            self._activity_row_output_chars[(row_index, output_field)] = actual_chars
+            self._activity_row_output_chars[key] = actual_chars
             self._update_activity_output_stats()
         existing = self.document.rows[row_index].get(output_field, "")
         self.table_model.set_cell(row_index, output_field, content)
@@ -666,6 +680,10 @@ class MainWindow(QMainWindow):
 
     def _handle_chunk_generated(self, row_index: int, output_field: str, chunk: str) -> None:
         key = (row_index, output_field)
+        if self._activity_current_key != key:
+            self._activity_current_key = key
+            self._activity_output_chars = 0
+            self._activity_row_output_chars = {key: 0}
         self._activity_row_output_chars[key] = self._activity_row_output_chars.get(key, 0) + len(chunk)
         self._activity_output_chars += len(chunk)
         dialog = self._activity_dialog
@@ -724,6 +742,7 @@ class MainWindow(QMainWindow):
         self._activity_dialog = None
         self._activity_output_chars = 0
         self._activity_row_output_chars = {}
+        self._activity_current_key = None
 
     def _cancel_processing(self) -> None:
         if self._worker is not None:

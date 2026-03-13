@@ -27,13 +27,29 @@ class FakeGenerationService:
     def validate_template(self, template: str, headers: list[str]) -> None:
         return None
 
-    def process_row(self, *, row_index, row, template, config, on_chunk=None, should_cancel=None):
+    class _PromptPayload:
+        def __init__(self, input_char_count: int) -> None:
+            self.input_char_count = input_char_count
+
+    def process_row(
+        self,
+        *,
+        row_index,
+        row,
+        template,
+        config,
+        on_prompt_ready=None,
+        on_chunk=None,
+        should_cancel=None,
+    ):
         class Result:
             def __init__(self, row_index: int, content: str) -> None:
                 self.row_index = row_index
                 self.content = content
 
         content = f"<p>{template}-{row['sku']}</p>"
+        if on_prompt_ready is not None:
+            on_prompt_ready(row_index, self._PromptPayload(len(template.replace("{{sku}}", row["sku"])) + len(USER_PROMPT)))
         if on_chunk is not None:
             on_chunk(row_index, content)
         return Result(row_index, content)
@@ -45,6 +61,7 @@ class FakeGenerationService:
         template,
         config,
         on_result=None,
+        on_prompt_ready=None,
         on_chunk=None,
         should_cancel=None,
     ):
@@ -57,6 +74,7 @@ class FakeGenerationService:
                 row=row,
                 template=template,
                 config=config,
+                on_prompt_ready=on_prompt_ready,
                 on_chunk=None,
                 should_cancel=should_cancel,
             )
@@ -69,13 +87,24 @@ class FakeGenerationService:
 
 
 class SlowCancellableGenerationService(FakeGenerationService):
-    def process_row(self, *, row_index, row, template, config, on_chunk=None, should_cancel=None):
+    def process_row(
+        self,
+        *,
+        row_index,
+        row,
+        template,
+        config,
+        on_prompt_ready=None,
+        on_chunk=None,
+        should_cancel=None,
+    ):
         QThread.msleep(50)
         return super().process_row(
             row_index=row_index,
             row=row,
             template=template,
             config=config,
+            on_prompt_ready=on_prompt_ready,
             on_chunk=on_chunk,
             should_cancel=should_cancel,
         )
@@ -243,6 +272,34 @@ def test_process_all_runs_only_enabled_prompts(qtbot, tmp_path: Path, monkeypatc
     assert window.document.rows[0]["generated_two"] == ""
 
 
+def test_activity_stats_reset_for_each_prompt_run(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    window._show_activity_dialog(
+        title="Processing",
+        status="Starting...",
+        total_records=2,
+        input_chars=10,
+    )
+    window._activity_output_chars = 12
+    window._activity_row_output_chars = {(0, "generated"): 12}
+
+    window._handle_prompt_started(0, "generated", 42)
+    assert "42" in window._activity_dialog.input_stats_label.text()
+    assert "0 chars" in window._activity_dialog.output_stats_label.text()
+
+    window._handle_chunk_generated(0, "generated", "abcd")
+    assert "4 chars" in window._activity_dialog.output_stats_label.text()
+
+    window._handle_prompt_started(0, "seo", 21)
+    assert "21" in window._activity_dialog.input_stats_label.text()
+    assert "0 chars" in window._activity_dialog.output_stats_label.text()
+
+    window._close_activity_dialog()
+
+
 def test_filters_limit_processing_scope_to_visible_rows(qtbot, tmp_path: Path, monkeypatch) -> None:
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
@@ -401,3 +458,18 @@ def test_main_window_uses_three_collapsible_panels_with_equal_initial_sizes(qtbo
     collapsed_sizes = window.sections_splitter.sizes()
     assert collapsed_sizes[1] < collapsed_sizes[0]
     assert collapsed_sizes[1] < collapsed_sizes[2]
+
+
+def test_collapsible_panels_use_palette_roles_in_stylesheet(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    stylesheet = window.csv_panel.styleSheet()
+
+    assert "palette(button)" in stylesheet
+    assert "palette(button-text)" in stylesheet
+    assert "palette(base)" in stylesheet
+    assert "palette(mid)" in stylesheet
+    assert "#2d2d2d" not in stylesheet
+    assert "#242424" not in stylesheet

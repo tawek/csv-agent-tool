@@ -25,8 +25,8 @@ class CollapsiblePanel(QWidget):
                 background-color: transparent;
             }
             QToolButton#panelToggle {
-                background-color: #2d2d2d;
-                color: #f0f0f0;
+                background-color: palette(button);
+                color: palette(button-text);
                 border: none;
                 border-radius: 0;
                 padding: 4px 6px 4px 4px;
@@ -35,18 +35,18 @@ class CollapsiblePanel(QWidget):
                 text-align: left;
             }
             QToolButton#panelToggle:hover {
-                background-color: #343434;
+                background-color: palette(midlight);
             }
             QLabel#panelTitle {
-                color: #f0f0f0;
-                background-color: #2d2d2d;
+                color: palette(button-text);
+                background-color: palette(button);
                 padding: 4px 8px 4px 2px;
                 min-height: 20px;
                 font-weight: 600;
             }
             QFrame#panelBody {
-                background-color: #242424;
-                border: 1px solid #4a4a4a;
+                background-color: palette(base);
+                border: 1px solid palette(mid);
                 border-radius: 8px;
             }
             """

@@ -60,11 +60,14 @@ class GenerationService:
         row: dict[str, str],
         template: str,
         config: AppConfig,
+        on_prompt_ready: Callable[[int, PromptPayload], None] | None = None,
         on_chunk: Callable[[int, str], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> GenerationResult:
         provider = self.provider_factory(config)
         prompt = self.prepare_prompt(template=template, row=row)
+        if on_prompt_ready is not None:
+            on_prompt_ready(row_index, prompt)
         content = provider.generate(
             system_prompt=prompt.system_prompt,
             user_prompt=prompt.user_prompt,
@@ -83,6 +86,7 @@ class GenerationService:
         template: str,
         config: AppConfig,
         on_result: Callable[[GenerationResult], None] | None = None,
+        on_prompt_ready: Callable[[int, PromptPayload], None] | None = None,
         on_chunk: Callable[[int, str], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> list[GenerationResult]:
@@ -92,6 +96,8 @@ class GenerationService:
             if should_cancel is not None and should_cancel():
                 break
             prompt = self.prepare_prompt(template=template, row=row)
+            if on_prompt_ready is not None:
+                on_prompt_ready(row_index, prompt)
             result = GenerationResult(
                 row_index=row_index,
                 content=provider.generate(
