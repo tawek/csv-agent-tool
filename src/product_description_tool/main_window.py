@@ -35,7 +35,7 @@ from product_description_tool.dialogs import (
 )
 from product_description_tool.filter_proxy import WildcardFilterProxyModel
 from product_description_tool.generation import GenerationService
-from product_description_tool.preview import HtmlPreview
+from product_description_tool.preview import HtmlPreview, analyze_html_content, format_html_stats
 from product_description_tool.project import Project, ProjectPrompt, ProjectRepository
 from product_description_tool.prompt_renderer import PromptTemplateError
 from product_description_tool.table_model import CsvTableModel
@@ -199,6 +199,8 @@ class MainWindow(QMainWindow):
         self.original_preview = HtmlPreview()
         left_layout.addWidget(self.original_preview)
         left_button_row = QHBoxLayout()
+        self.original_stats_label = QLabel(format_html_stats(analyze_html_content("")))
+        left_button_row.addWidget(self.original_stats_label)
         left_button_row.addStretch(1)
         self.edit_original_button = QPushButton("Edit")
         self.edit_original_button.clicked.connect(
@@ -217,6 +219,8 @@ class MainWindow(QMainWindow):
         self.result_preview = HtmlPreview()
         right_layout.addWidget(self.result_preview)
         right_button_row = QHBoxLayout()
+        self.result_stats_label = QLabel(format_html_stats(analyze_html_content("")))
+        right_button_row.addWidget(self.result_stats_label)
         right_button_row.addStretch(1)
         self.edit_result_button = QPushButton("Edit")
         self.edit_result_button.clicked.connect(
@@ -638,6 +642,7 @@ class MainWindow(QMainWindow):
         prompts: list[ProjectPrompt],
         row_specs: list[tuple[int, dict[str, str]]],
     ) -> None:
+        dialog_config = self._dialog_config()
         total_records, input_chars = self._build_activity_summary(
             prompts=prompts,
             row_specs=row_specs,
@@ -658,13 +663,14 @@ class MainWindow(QMainWindow):
             total_records=total_records,
             input_chars=input_chars,
             close_on_finish=close_on_finish,
+            config=dialog_config,
         )
         self._set_busy(True)
         worker = GenerationWorker(
             service=self.generation_service,
             row_specs=row_specs,
             prompts=prompts,
-            config=self._dialog_config(),
+            config=dialog_config,
         )
         thread = QThread(self)
         self._worker = worker
@@ -788,7 +794,10 @@ class MainWindow(QMainWindow):
         total_records: int,
         input_chars: int,
         close_on_finish: bool,
+        config: AppConfig | None = None,
     ) -> None:
+        provider_name, model_name = self._activity_provider_details(config)
+        generation_config = config.generation if config is not None else None
         dialog = ActivityDialog(self)
         dialog.cancel_requested.connect(self._cancel_processing)
         dialog.start_activity(
@@ -797,8 +806,22 @@ class MainWindow(QMainWindow):
             total_records=total_records,
             input_chars=input_chars,
             close_on_finish=close_on_finish,
+            provider_name=provider_name,
+            model_name=model_name,
+            temperature=None if generation_config is None else generation_config.temperature,
+            top_p=None if generation_config is None else generation_config.top_p,
+            max_output_tokens=(
+                None if generation_config is None else generation_config.max_output_tokens
+            ),
         )
         self._activity_dialog = dialog
+
+    def _activity_provider_details(self, config: AppConfig | None) -> tuple[str, str]:
+        if config is None:
+            return ("", "")
+        if config.provider.active == "openai":
+            return ("OpenAI-compatible", config.provider.openai.model.strip())
+        return ("Ollama", config.provider.ollama.model.strip())
 
     def _close_activity_dialog(
         self,
@@ -895,6 +918,8 @@ class MainWindow(QMainWindow):
         self.last_result_preview_html = result_html
         self.original_preview.set_html(original_html)
         self.result_preview.set_html(result_html)
+        self.original_stats_label.setText(format_html_stats(analyze_html_content(original_html)))
+        self.result_stats_label.setText(format_html_stats(analyze_html_content(result_html)))
 
     def edit_selected_description(self, column_name: str) -> None:
         if not column_name:

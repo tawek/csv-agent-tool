@@ -246,6 +246,8 @@ def test_loading_and_selecting_row_updates_previews(qtbot, tmp_path: Path, monke
     qtbot.waitUntil(lambda: window.table_view.viewport().width() > 0)
 
     assert window.last_result_preview_html == "B-2"
+    assert window.original_stats_label.text() == "Sections: 0, Paragraphs: 1, Words: 2, Characters: 5"
+    assert window.result_stats_label.text() == "Sections: 0, Paragraphs: 0, Words: 1, Characters: 3"
     assert "Files" not in [group.title() for group in window.findChildren(QGroupBox)]
     total_width = sum(window.table_view.columnWidth(index) for index in range(window.proxy_model.columnCount()))
     assert total_width <= window.table_view.viewport().width() + 4
@@ -309,6 +311,34 @@ def test_preview_selected_updates_only_current_prompt_field(qtbot, tmp_path: Pat
 
     qtbot.waitUntil(lambda: window.document.rows[1]["generated"] == "<p>Rewrite {{sku}}-B-2</p>")
     assert window.document.rows[0]["generated"] == "<p>Existing</p>"
+
+
+def test_preview_activity_dialog_shows_active_provider_and_generation_settings(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    window.generation_service = FakeGenerationService()
+    window.config.provider.active = "openai"
+    window.config.provider.openai.model = "gpt-5-mini"
+    window.config.generation.temperature = 0.4
+    window.config.generation.top_p = 0.85
+    window.config.generation.max_output_tokens = 750
+    csv_path = _write_csv(tmp_path)
+    _import_window_csv(window, monkeypatch, csv_path)
+    _add_prompt(window, output_field="generated", prompt="Rewrite {{sku}}")
+
+    window.preview_selected_row()
+
+    assert window._activity_dialog is not None
+    assert window._activity_dialog.provider_value_label.text() == "OpenAI-compatible"
+    assert window._activity_dialog.model_value_label.text() == "gpt-5-mini"
+    assert window._activity_dialog.temperature_value_label.text() == "0.4"
+    assert window._activity_dialog.top_p_value_label.text() == "0.85"
+    assert window._activity_dialog.max_output_tokens_value_label.text() == "750"
 
 
 def test_process_all_runs_only_enabled_prompts(qtbot, tmp_path: Path, monkeypatch) -> None:

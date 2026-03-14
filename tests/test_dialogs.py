@@ -62,6 +62,30 @@ def test_activity_dialog_can_be_closed_after_finish_when_close_on_finish_is_off(
     assert dialog.isVisible() is False
 
 
+def test_activity_dialog_displays_run_configuration(qtbot) -> None:
+    dialog = ActivityDialog()
+    qtbot.addWidget(dialog)
+
+    dialog.start_activity(
+        title="Processing",
+        status="Working...",
+        total_records=2,
+        input_chars=10,
+        close_on_finish=False,
+        provider_name="OpenAI-compatible",
+        model_name="gpt-5-mini",
+        temperature=0.4,
+        top_p=0.85,
+        max_output_tokens=750,
+    )
+
+    assert dialog.provider_value_label.text() == "OpenAI-compatible"
+    assert dialog.model_value_label.text() == "gpt-5-mini"
+    assert dialog.temperature_value_label.text() == "0.4"
+    assert dialog.top_p_value_label.text() == "0.85"
+    assert dialog.max_output_tokens_value_label.text() == "750"
+
+
 def test_activity_dialog_becomes_modeless_while_cancelling(qtbot) -> None:
     dialog = ActivityDialog()
     qtbot.addWidget(dialog)

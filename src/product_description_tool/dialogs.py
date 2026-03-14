@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -80,7 +81,7 @@ class ActivityDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setModal(True)
-        self.resize(520, 260)
+        self.resize(520, 360)
 
         self._elapsed_seconds = 0
         self._allow_close = False
@@ -125,6 +126,23 @@ class ActivityDialog(QDialog):
         self.record_progress_bar.setValue(0)
         layout.addWidget(self.record_progress_bar)
 
+        run_config_group = QGroupBox("Run configuration")
+        run_config_layout = QFormLayout(run_config_group)
+        run_config_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        self.provider_value_label = QLabel("Not set")
+        self.provider_value_label.setWordWrap(True)
+        self.model_value_label = QLabel("Not set")
+        self.model_value_label.setWordWrap(True)
+        self.temperature_value_label = QLabel("Not set")
+        self.top_p_value_label = QLabel("Not set")
+        self.max_output_tokens_value_label = QLabel("Not set")
+        run_config_layout.addRow("Provider", self.provider_value_label)
+        run_config_layout.addRow("Model", self.model_value_label)
+        run_config_layout.addRow("Temperature", self.temperature_value_label)
+        run_config_layout.addRow("Top P", self.top_p_value_label)
+        run_config_layout.addRow("Max output tokens", self.max_output_tokens_value_label)
+        layout.addWidget(run_config_group)
+
         self.input_stats_label = QLabel("Input prompt: 0 chars (~0 tokens)")
         self.output_stats_label = QLabel("Output: 0 chars (~0 tokens)")
         layout.addWidget(self.input_stats_label)
@@ -148,6 +166,11 @@ class ActivityDialog(QDialog):
         total_records: int,
         input_chars: int,
         close_on_finish: bool,
+        provider_name: str = "",
+        model_name: str = "",
+        temperature: float | None = None,
+        top_p: float | None = None,
+        max_output_tokens: int | None = None,
     ) -> None:
         self.setModal(True)
         self._allow_close = False
@@ -162,6 +185,13 @@ class ActivityDialog(QDialog):
         self.cancel_button.setText("Cancel")
         self.elapsed_label.setText("0:00:00")
         self.set_record_progress(0, total_records)
+        self.set_run_configuration(
+            provider_name=provider_name,
+            model_name=model_name,
+            temperature=temperature,
+            top_p=top_p,
+            max_output_tokens=max_output_tokens,
+        )
         self.set_input_stats(input_chars)
         self.set_output_stats(0)
         self._timer.start()
@@ -183,6 +213,25 @@ class ActivityDialog(QDialog):
 
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
+
+    def set_run_configuration(
+        self,
+        *,
+        provider_name: str,
+        model_name: str,
+        temperature: float | None,
+        top_p: float | None,
+        max_output_tokens: int | None,
+    ) -> None:
+        self.provider_value_label.setText(provider_name or "Not set")
+        self.model_value_label.setText(model_name or "Not set")
+        self.temperature_value_label.setText(
+            "Not set" if temperature is None else str(temperature)
+        )
+        self.top_p_value_label.setText("Not set" if top_p is None else str(top_p))
+        self.max_output_tokens_value_label.setText(
+            "Not set" if max_output_tokens is None else str(max_output_tokens)
+        )
 
     def request_cancel(self) -> None:
         if self._allow_close:
