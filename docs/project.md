@@ -236,7 +236,7 @@ Future agents working in this area should preserve these behaviors:
 - opening a project should still work even if the sibling CSV is missing
 - saving a project must continue to save both the project definition and the sibling CSV
 - adding a prompt must continue to materialize its output column
-- disabling a prompt should exclude it from "Process All" but not delete its column or content
+- disabling a  prompt should exclude it from "Process All" but not delete its column or content
 - filtering the table should continue to scope batch processing
 - project CSV settings must remain compatible with `CsvRepository.load()` and `CsvRepository.save()`
 

@@ -7,6 +7,7 @@ from typing import Any
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QCloseEvent, QPainter, QTextDocument
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QTableWidget,
@@ -35,6 +37,7 @@ from product_description_tool.config import (
 )
 from product_description_tool.generation import estimate_tokens_from_chars
 from product_description_tool.highlighter import HtmlSyntaxHighlighter
+from product_description_tool.providers import list_ollama_models, list_openai_models
 
 
 class SpinnerWidget(QWidget):
@@ -82,6 +85,7 @@ class ActivityDialog(QDialog):
         self._elapsed_seconds = 0
         self._allow_close = False
         self._cancel_requested = False
+        self._close_on_finish = False
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._tick)
@@ -126,10 +130,13 @@ class ActivityDialog(QDialog):
         layout.addWidget(self.input_stats_label)
         layout.addWidget(self.output_stats_label)
 
+        self.close_on_finish_checkbox = QCheckBox("Close on finish")
+        layout.addWidget(self.close_on_finish_checkbox)
+
         footer = QHBoxLayout()
         footer.addStretch(1)
         self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.clicked.connect(self.request_cancel)
+        self.cancel_button.clicked.connect(self._handle_action_button)
         footer.addWidget(self.cancel_button)
         layout.addLayout(footer)
 
@@ -140,13 +147,17 @@ class ActivityDialog(QDialog):
         status: str,
         total_records: int,
         input_chars: int,
+        close_on_finish: bool,
     ) -> None:
+        self.setModal(True)
         self._allow_close = False
         self._cancel_requested = False
+        self._close_on_finish = close_on_finish
         self._elapsed_seconds = 0
         self.setWindowTitle(title)
         self.title_label.setText(title)
         self.status_label.setText(status)
+        self.close_on_finish_checkbox.setChecked(close_on_finish)
         self.cancel_button.setEnabled(True)
         self.cancel_button.setText("Cancel")
         self.elapsed_label.setText("0:00:00")
@@ -174,6 +185,9 @@ class ActivityDialog(QDialog):
         self.status_label.setText(text)
 
     def request_cancel(self) -> None:
+        if self._allow_close:
+            self.close()
+            return
         if self._cancel_requested:
             return
         self._cancel_requested = True
@@ -182,13 +196,23 @@ class ActivityDialog(QDialog):
         self.status_label.setText("Cancelling...")
         self.cancel_requested.emit()
 
-    def close_activity(self) -> None:
+    def close_activity(self, *, force_close: bool = False) -> None:
         self._timer.stop()
         self._allow_close = True
-        self.close()
-        self.deleteLater()
+        if force_close or self.close_on_finish_checkbox.isChecked():
+            self.close()
+            self.deleteLater()
+            return
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.setText("Close")
+
+    def finish_status(self, text: str) -> None:
+        self.status_label.setText(text)
 
     def reject(self) -> None:
+        if self._allow_close:
+            super().reject()
+            return
         self.request_cancel()
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -197,6 +221,12 @@ class ActivityDialog(QDialog):
             self.request_cancel()
             return
         super().closeEvent(event)
+
+    def _handle_action_button(self) -> None:
+        if self._allow_close:
+            self.close()
+            return
+        self.request_cancel()
 
     def _tick(self) -> None:
         self._elapsed_seconds += 1
@@ -304,14 +334,30 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root_layout.addWidget(buttons)
 
+    def _configure_form_layout(self, layout: QFormLayout) -> None:
+        layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        layout.setFormAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+    def _expand_control(
+        self,
+        widget: QWidget,
+        *,
+        minimum_width: int = 320,
+    ) -> None:
+        widget.setMinimumWidth(minimum_width)
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, widget.sizePolicy().verticalPolicy())
+
     def _build_provider_tab(self) -> None:
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
         top_form = QFormLayout()
+        self._configure_form_layout(top_form)
         self.active_provider_combo = QComboBox()
         self.active_provider_combo.addItems(["ollama", "openai"])
         self.active_provider_combo.setCurrentText(self._config.provider.active)
+        self._expand_control(self.active_provider_combo)
         top_form.addRow("Active provider", self.active_provider_combo)
         layout.addLayout(top_form)
 
@@ -320,50 +366,163 @@ class SettingsDialog(QDialog):
 
         ollama_tab = QWidget()
         ollama_form = QFormLayout(ollama_tab)
+        self._configure_form_layout(ollama_form)
         self.ollama_base_url_edit = QLineEdit(self._config.provider.ollama.base_url)
-        self.ollama_model_edit = QLineEdit(self._config.provider.ollama.model)
+        self._expand_control(self.ollama_base_url_edit, minimum_width=420)
+        (
+            self.ollama_model_combo,
+            self.ollama_model_refresh_button,
+        ) = self._create_model_selector(
+            self._config.provider.ollama.model,
+            self._refresh_ollama_models,
+        )
         self.ollama_options_edit = QPlainTextEdit(
             json.dumps(self._config.provider.ollama.options, indent=2)
         )
+        self._expand_control(self.ollama_options_edit, minimum_width=420)
         ollama_form.addRow("Base URL", self.ollama_base_url_edit)
-        ollama_form.addRow("Model", self.ollama_model_edit)
+        ollama_form.addRow("Model", self.ollama_model_combo.parentWidget())
         ollama_form.addRow("Options JSON", self.ollama_options_edit)
         provider_tabs.addTab(ollama_tab, "Ollama")
 
         openai_tab = QWidget()
         openai_form = QFormLayout(openai_tab)
+        self._configure_form_layout(openai_form)
         self.openai_base_url_edit = QLineEdit(self._config.provider.openai.base_url)
+        self._expand_control(self.openai_base_url_edit, minimum_width=420)
         self.openai_api_key_edit = QLineEdit(self._config.provider.openai.api_key)
         self.openai_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.openai_model_edit = QLineEdit(self._config.provider.openai.model)
+        self._expand_control(self.openai_api_key_edit, minimum_width=420)
+        (
+            self.openai_model_combo,
+            self.openai_model_refresh_button,
+        ) = self._create_model_selector(
+            self._config.provider.openai.model,
+            self._refresh_openai_models,
+        )
         self.openai_options_edit = QPlainTextEdit(
             json.dumps(self._config.provider.openai.options, indent=2)
         )
+        self._expand_control(self.openai_options_edit, minimum_width=420)
         openai_form.addRow("Base URL", self.openai_base_url_edit)
         openai_form.addRow("API key", self.openai_api_key_edit)
-        openai_form.addRow("Model", self.openai_model_edit)
+        openai_form.addRow("Model", self.openai_model_combo.parentWidget())
         openai_form.addRow("Options JSON", self.openai_options_edit)
         provider_tabs.addTab(openai_tab, "OpenAI-compatible")
 
         self.tabs.addTab(tab, "Provider")
 
+    def _create_model_selector(
+        self,
+        current_value: str,
+        refresh_handler,
+    ) -> tuple[QComboBox, QPushButton]:
+        container = QWidget(self)
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        container.setMinimumWidth(420)
+
+        combo = QComboBox(container)
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        combo.setDuplicatesEnabled(False)
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContentsOnFirstShow)
+        combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        combo.setMinimumContentsLength(24)
+        if current_value:
+            combo.addItem(current_value)
+        combo.setEditText(current_value)
+        layout.addWidget(combo, 1)
+
+        refresh_button = QPushButton("Refresh", container)
+        refresh_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        refresh_button.clicked.connect(refresh_handler)
+        layout.addWidget(refresh_button)
+
+        return combo, refresh_button
+
+    def _replace_model_choices(self, combo: QComboBox, model_names: list[str]) -> None:
+        current_text = combo.currentText()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(model_names)
+        combo.setEditText(current_text)
+        combo.blockSignals(False)
+
+    def _refresh_model_choices(
+        self,
+        *,
+        combo: QComboBox,
+        refresh_button: QPushButton,
+        provider_name: str,
+        loader,
+    ) -> None:
+        refresh_button.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            model_names = loader()
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                f"{provider_name} Models",
+                f"Could not load models from {provider_name}: {exc}",
+            )
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+            refresh_button.setEnabled(True)
+
+        self._replace_model_choices(combo, model_names)
+        if not model_names:
+            QMessageBox.information(
+                self,
+                f"{provider_name} Models",
+                f"{provider_name} did not return any models.",
+            )
+
+    def _refresh_ollama_models(self) -> None:
+        self._refresh_model_choices(
+            combo=self.ollama_model_combo,
+            refresh_button=self.ollama_model_refresh_button,
+            provider_name="Ollama",
+            loader=lambda: list_ollama_models(
+                base_url=self.ollama_base_url_edit.text().strip(),
+            ),
+        )
+
+    def _refresh_openai_models(self) -> None:
+        self._refresh_model_choices(
+            combo=self.openai_model_combo,
+            refresh_button=self.openai_model_refresh_button,
+            provider_name="OpenAI-compatible endpoint",
+            loader=lambda: list_openai_models(
+                base_url=self.openai_base_url_edit.text().strip(),
+                api_key=self.openai_api_key_edit.text().strip(),
+            ),
+        )
+
     def _build_generation_tab(self) -> None:
         tab = QWidget()
         layout = QFormLayout(tab)
+        self._configure_form_layout(layout)
 
         self.temperature_spin = QDoubleSpinBox()
         self.temperature_spin.setRange(0.0, 2.0)
         self.temperature_spin.setSingleStep(0.1)
         self.temperature_spin.setValue(self._config.generation.temperature)
+        self._expand_control(self.temperature_spin, minimum_width=180)
 
         self.top_p_spin = QDoubleSpinBox()
         self.top_p_spin.setRange(0.0, 1.0)
         self.top_p_spin.setSingleStep(0.05)
         self.top_p_spin.setValue(self._config.generation.top_p)
+        self._expand_control(self.top_p_spin, minimum_width=180)
 
         self.max_tokens_spin = QSpinBox()
         self.max_tokens_spin.setRange(1, 200000)
         self.max_tokens_spin.setValue(self._config.generation.max_output_tokens)
+        self._expand_control(self.max_tokens_spin, minimum_width=180)
 
         layout.addRow("Temperature", self.temperature_spin)
         layout.addRow("Top P", self.top_p_spin)
@@ -375,6 +534,7 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(tab)
 
         form = QFormLayout()
+        self._configure_form_layout(form)
         self.original_description_edit = QLineEdit(self._config.csv.original_description)
         self.delimiter_edit = QLineEdit(self._config.csv.delimiter)
         self.quotechar_edit = QLineEdit(self._config.csv.quotechar)
@@ -382,6 +542,11 @@ class SettingsDialog(QDialog):
         self.newline_edit = QLineEdit(self._config.csv.newline)
         self.write_header_checkbox = QCheckBox()
         self.write_header_checkbox.setChecked(self._config.csv.write_header)
+        self._expand_control(self.original_description_edit)
+        self._expand_control(self.delimiter_edit, minimum_width=120)
+        self._expand_control(self.quotechar_edit, minimum_width=120)
+        self._expand_control(self.encoding_edit)
+        self._expand_control(self.newline_edit)
 
         form.addRow("Original description column", self.original_description_edit)
         form.addRow("Delimiter", self.delimiter_edit)
@@ -503,7 +668,7 @@ class SettingsDialog(QDialog):
                     "active": self.active_provider_combo.currentText(),
                     "ollama": {
                         "base_url": self.ollama_base_url_edit.text().strip(),
-                        "model": self.ollama_model_edit.text().strip(),
+                        "model": self.ollama_model_combo.currentText().strip(),
                         "options": self._parse_json(
                             self.ollama_options_edit.toPlainText(),
                             "Ollama options JSON",
@@ -512,7 +677,7 @@ class SettingsDialog(QDialog):
                     "openai": {
                         "base_url": self.openai_base_url_edit.text().strip(),
                         "api_key": self.openai_api_key_edit.text().strip(),
-                        "model": self.openai_model_edit.text().strip(),
+                        "model": self.openai_model_combo.currentText().strip(),
                         "options": self._parse_json(
                             self.openai_options_edit.toPlainText(),
                             "OpenAI options JSON",

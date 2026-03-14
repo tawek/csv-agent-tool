@@ -8,6 +8,7 @@ from product_description_tool.config import AppConfig, ConfigStore, FieldConfig
 from product_description_tool.generation import USER_PROMPT
 from product_description_tool.main_window import MainWindow
 from product_description_tool.project import ProjectPrompt
+from product_description_tool.providers import GenerationCancelled
 
 
 class FakeDialog:
@@ -108,6 +109,63 @@ class SlowCancellableGenerationService(FakeGenerationService):
             on_chunk=on_chunk,
             should_cancel=should_cancel,
         )
+
+
+class BlockingCancellableGenerationService(FakeGenerationService):
+    def __init__(self) -> None:
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+
+    def process_row(
+        self,
+        *,
+        row_index,
+        row,
+        template,
+        config,
+        on_prompt_ready=None,
+        on_chunk=None,
+        should_cancel=None,
+    ):
+        if on_prompt_ready is not None:
+            on_prompt_ready(
+                row_index,
+                self._PromptPayload(len(template.replace("{{sku}}", row["sku"])) + len(USER_PROMPT)),
+            )
+        while not self._cancel_requested:
+            QThread.msleep(10)
+        raise GenerationCancelled("Generation cancelled.")
+
+
+class DelayedCancelGenerationService(FakeGenerationService):
+    def __init__(self) -> None:
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+
+    def process_row(
+        self,
+        *,
+        row_index,
+        row,
+        template,
+        config,
+        on_prompt_ready=None,
+        on_chunk=None,
+        should_cancel=None,
+    ):
+        if on_prompt_ready is not None:
+            on_prompt_ready(
+                row_index,
+                self._PromptPayload(len(template.replace("{{sku}}", row["sku"])) + len(USER_PROMPT)),
+            )
+        while not self._cancel_requested:
+            QThread.msleep(10)
+        QThread.msleep(250)
+        raise GenerationCancelled("Generation cancelled.")
 
 
 class FakeSettingsDialog:
@@ -282,6 +340,7 @@ def test_activity_stats_reset_for_each_prompt_run(qtbot, tmp_path: Path) -> None
         status="Starting...",
         total_records=2,
         input_chars=10,
+        close_on_finish=False,
     )
     window._activity_output_chars = 12
     window._activity_row_output_chars = {(0, "generated"): 12}
@@ -315,12 +374,32 @@ def test_filters_limit_processing_scope_to_visible_rows(qtbot, tmp_path: Path, m
 
     assert window.proxy_model.rowCount() == 1
 
-    window.process_all_rows()
+    window.process_visible_rows()
 
     qtbot.waitUntil(lambda: window.document.rows[0]["generated"] == "<p>Rewrite {{sku}}-A-1</p>")
     assert window.document.rows[0]["generated"] == "<p>Rewrite {{sku}}-A-1</p>"
     assert window.document.rows[1]["generated"] == ""
     assert window.filter_button.text() == "Filter (1)"
+
+
+def test_process_all_rows_ignores_filter_scope(qtbot, tmp_path: Path, monkeypatch) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    window.generation_service = FakeGenerationService()
+    csv_path = _write_csv(tmp_path)
+    _import_window_csv(window, monkeypatch, csv_path)
+    _add_prompt(window, output_field="generated", prompt="Rewrite {{sku}}")
+
+    window.filter_patterns = {"sku": "A-*"}
+    window.proxy_model.set_filter_pattern(0, "A-*")
+    window._update_filter_button_text()
+
+    window.process_all_rows()
+
+    qtbot.waitUntil(lambda: window.document.rows[1]["generated"] == "<p>Rewrite {{sku}}-B-2</p>")
+    assert window.document.rows[0]["generated"] == "<p>Rewrite {{sku}}-A-1</p>"
+    assert window.document.rows[1]["generated"] == "<p>Rewrite {{sku}}-B-2</p>"
 
 
 def test_description_field_selector_reloads_preview(qtbot, tmp_path: Path, monkeypatch) -> None:
@@ -372,6 +451,7 @@ def test_cancel_batch_processing_stops_before_all_rows_finish(qtbot, tmp_path: P
 
     window.process_all_rows()
     qtbot.waitUntil(lambda: window._activity_dialog is not None)
+    dialog = window._activity_dialog
     qtbot.waitUntil(lambda: window.document.rows[0]["generated"] == "<p>Rewrite {{sku}}-A-1</p>")
 
     window._cancel_processing()
@@ -379,6 +459,117 @@ def test_cancel_batch_processing_stops_before_all_rows_finish(qtbot, tmp_path: P
     qtbot.waitUntil(lambda: window._worker_thread is None)
     assert window.status.currentMessage() == "Processing cancelled"
     assert window.document.rows[-1]["generated"] == ""
+    assert window._activity_dialog is None
+
+
+def test_cancel_batch_processing_restores_main_window_state_after_forced_abort(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    window.generation_service = BlockingCancellableGenerationService()
+    csv_path = _write_csv(tmp_path, row_count=2)
+    _import_window_csv(window, monkeypatch, csv_path)
+    _add_prompt(window, output_field="generated", prompt="Rewrite {{sku}}")
+
+    window.process_all_rows()
+    qtbot.waitUntil(lambda: window._activity_dialog is not None)
+    qtbot.waitUntil(lambda: window._worker_thread is not None)
+
+    window._cancel_processing()
+
+    qtbot.waitUntil(lambda: window._worker_thread is None)
+    assert window.status.currentMessage() == "Processing cancelled"
+    assert window._busy is False
+    assert window.filter_button.isEnabled() is True
+    assert window.process_button.isEnabled() is True
+    assert window.preview_button.isEnabled() is True
+
+
+def test_cancel_batch_processing_closes_dialog_immediately_while_worker_unwinds(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    window.generation_service = DelayedCancelGenerationService()
+    csv_path = _write_csv(tmp_path, row_count=2)
+    _import_window_csv(window, monkeypatch, csv_path)
+    _add_prompt(window, output_field="generated", prompt="Rewrite {{sku}}")
+
+    window.process_all_rows()
+    qtbot.waitUntil(lambda: window._activity_dialog is not None)
+    qtbot.waitUntil(lambda: window._worker_thread is not None)
+
+    window._cancel_processing()
+
+    assert window._activity_dialog is None
+    assert window.status.currentMessage() == "Cancelling..."
+    assert window._worker_thread is not None
+    assert window._busy is False
+    assert window.filter_button.isEnabled() is True
+    assert window.settings_action.isEnabled() is True
+    assert window.edit_original_button.isEnabled() is True
+    assert window.process_button.isEnabled() is False
+    assert window.preview_button.isEnabled() is False
+
+    qtbot.waitUntil(lambda: window._worker_thread is None)
+    assert window.status.currentMessage() == "Processing cancelled"
+
+
+def test_large_processing_run_requires_confirmation(qtbot, tmp_path: Path, monkeypatch) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    window.generation_service = FakeGenerationService()
+    csv_path = _write_csv(tmp_path, row_count=11)
+    _import_window_csv(window, monkeypatch, csv_path)
+    _add_prompt(window, output_field="generated", prompt="Rewrite {{sku}}")
+
+    monkeypatch.setattr(
+        "product_description_tool.main_window.QMessageBox.question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.No,
+    )
+
+    window.process_all_rows()
+
+    assert window._worker_thread is None
+    assert all(row["generated"] in {"", "<p>Existing</p>"} for row in window.document.rows)
+
+
+def test_single_preview_defaults_close_on_finish(qtbot, tmp_path: Path, monkeypatch) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    window.generation_service = FakeGenerationService()
+    csv_path = _write_csv(tmp_path)
+    _import_window_csv(window, monkeypatch, csv_path)
+    _add_prompt(window, output_field="generated", prompt="Rewrite {{sku}}")
+
+    window.preview_selected_row()
+
+    assert window._activity_dialog is not None
+    assert window._activity_dialog.close_on_finish_checkbox.isChecked()
+
+
+def test_batch_processing_defaults_close_on_finish_off(qtbot, tmp_path: Path, monkeypatch) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    window.generation_service = FakeGenerationService()
+    csv_path = _write_csv(tmp_path)
+    _import_window_csv(window, monkeypatch, csv_path)
+    _add_prompt(window, output_field="generated", prompt="Rewrite {{sku}}")
+
+    window.process_all_rows()
+
+    assert window._activity_dialog is not None
+    assert not window._activity_dialog.close_on_finish_checkbox.isChecked()
 
 
 def test_open_settings_updates_table_and_preserves_selected_row(qtbot, tmp_path: Path, monkeypatch) -> None:

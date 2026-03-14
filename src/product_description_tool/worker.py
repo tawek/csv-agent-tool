@@ -36,6 +36,9 @@ class GenerationWorker(QObject):
 
     def cancel(self) -> None:
         self._cancel_requested.set()
+        cancel = getattr(self.service, "cancel", None)
+        if callable(cancel):
+            cancel()
 
     def run(self) -> None:
         total = self._total_operations()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Callable
 
@@ -43,6 +44,18 @@ class GenerationService:
     ) -> None:
         self.prompt_renderer = prompt_renderer or PromptRenderer()
         self.provider_factory = provider_factory
+        self._active_provider: ProviderClient | None = None
+        self._active_provider_lock = threading.Lock()
+
+    def cancel(self) -> None:
+        with self._active_provider_lock:
+            provider = self._active_provider
+        if provider is not None:
+            provider.cancel()
+
+    def _set_active_provider(self, provider: ProviderClient | None) -> None:
+        with self._active_provider_lock:
+            self._active_provider = provider
 
     def validate_template(self, template: str, headers: list[str]) -> None:
         self.prompt_renderer.validate(template, headers)
@@ -65,18 +78,22 @@ class GenerationService:
         should_cancel: Callable[[], bool] | None = None,
     ) -> GenerationResult:
         provider = self.provider_factory(config)
-        prompt = self.prepare_prompt(template=template, row=row)
-        if on_prompt_ready is not None:
-            on_prompt_ready(row_index, prompt)
-        content = provider.generate(
-            system_prompt=prompt.system_prompt,
-            user_prompt=prompt.user_prompt,
-            temperature=config.generation.temperature,
-            top_p=config.generation.top_p,
-            max_output_tokens=config.generation.max_output_tokens,
-            on_chunk=(lambda chunk: on_chunk(row_index, chunk)) if on_chunk is not None else None,
-            should_cancel=should_cancel,
-        )
+        self._set_active_provider(provider)
+        try:
+            prompt = self.prepare_prompt(template=template, row=row)
+            if on_prompt_ready is not None:
+                on_prompt_ready(row_index, prompt)
+            content = provider.generate(
+                system_prompt=prompt.system_prompt,
+                user_prompt=prompt.user_prompt,
+                temperature=config.generation.temperature,
+                top_p=config.generation.top_p,
+                max_output_tokens=config.generation.max_output_tokens,
+                on_chunk=(lambda chunk: on_chunk(row_index, chunk)) if on_chunk is not None else None,
+                should_cancel=should_cancel,
+            )
+        finally:
+            self._set_active_provider(None)
         return GenerationResult(row_index=row_index, content=content)
 
     def process_rows(
@@ -91,30 +108,34 @@ class GenerationService:
         should_cancel: Callable[[], bool] | None = None,
     ) -> list[GenerationResult]:
         provider = self.provider_factory(config)
-        results: list[GenerationResult] = []
-        for row_index, row in enumerate(rows):
-            if should_cancel is not None and should_cancel():
-                break
-            prompt = self.prepare_prompt(template=template, row=row)
-            if on_prompt_ready is not None:
-                on_prompt_ready(row_index, prompt)
-            result = GenerationResult(
-                row_index=row_index,
-                content=provider.generate(
-                    system_prompt=prompt.system_prompt,
-                    user_prompt=prompt.user_prompt,
-                    temperature=config.generation.temperature,
-                    top_p=config.generation.top_p,
-                    max_output_tokens=config.generation.max_output_tokens,
-                    on_chunk=(
-                        (lambda chunk, current_index=row_index: on_chunk(current_index, chunk))
-                        if on_chunk is not None
-                        else None
+        self._set_active_provider(provider)
+        try:
+            results: list[GenerationResult] = []
+            for row_index, row in enumerate(rows):
+                if should_cancel is not None and should_cancel():
+                    break
+                prompt = self.prepare_prompt(template=template, row=row)
+                if on_prompt_ready is not None:
+                    on_prompt_ready(row_index, prompt)
+                result = GenerationResult(
+                    row_index=row_index,
+                    content=provider.generate(
+                        system_prompt=prompt.system_prompt,
+                        user_prompt=prompt.user_prompt,
+                        temperature=config.generation.temperature,
+                        top_p=config.generation.top_p,
+                        max_output_tokens=config.generation.max_output_tokens,
+                        on_chunk=(
+                            (lambda chunk, current_index=row_index: on_chunk(current_index, chunk))
+                            if on_chunk is not None
+                            else None
+                        ),
+                        should_cancel=should_cancel,
                     ),
-                    should_cancel=should_cancel,
-                ),
-            )
-            results.append(result)
-            if on_result is not None:
-                on_result(result)
+                )
+                results.append(result)
+                if on_result is not None:
+                    on_result(result)
+        finally:
+            self._set_active_provider(None)
         return results

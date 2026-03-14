@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QMenu,
     QPushButton,
     QPlainTextEdit,
     QSplitter,
@@ -66,6 +67,7 @@ class MainWindow(QMainWindow):
         self._activity_output_chars = 0
         self._activity_row_output_chars: dict[tuple[int, str], int] = {}
         self._activity_current_key: tuple[int, str] | None = None
+        self._cancel_requested = False
         self._busy = False
         self._project_modified = False
         self._updating_prompt_ui = False
@@ -161,9 +163,25 @@ class MainWindow(QMainWindow):
 
         process_row = QHBoxLayout()
         process_row.addStretch(1)
-        self.process_button = QPushButton("Process All")
+        self.process_button = QPushButton("Process")
         self.process_button.clicked.connect(self.process_all_rows)
+        self.process_button.setStyleSheet(
+            "QPushButton { border-top-right-radius: 0; border-bottom-right-radius: 0; }"
+        )
+        self.process_button_menu = QMenu(self.process_button)
+        self.process_all_rows_action = self.process_button_menu.addAction("All CSV rows")
+        self.process_all_rows_action.triggered.connect(self.process_all_rows)
+        self.process_visible_rows_action = self.process_button_menu.addAction("Visible rows")
+        self.process_visible_rows_action.triggered.connect(self.process_visible_rows)
         process_row.addWidget(self.process_button)
+        self.process_menu_button = QPushButton("▼")
+        self.process_menu_button.setMenu(self.process_button_menu)
+        self.process_menu_button.setFixedWidth(28)
+        self.process_menu_button.setStyleSheet(
+            "QPushButton { border-top-left-radius: 0; border-bottom-left-radius: 0; }"
+            "QPushButton::menu-indicator { image: none; width: 0px; }"
+        )
+        process_row.addWidget(self.process_menu_button)
         prompt_layout.addLayout(process_row)
 
         description_layout = QVBoxLayout(self.description_panel.content)
@@ -267,13 +285,17 @@ class MainWindow(QMainWindow):
         edit_menu.addActions([self.settings_action, self.edit_original_action, self.edit_result_action])
 
         process_menu = menu_bar.addMenu("Process")
-        self.process_all_action = QAction("All", self)
+        self.process_all_action = QAction("All CSV Rows", self)
         self.process_all_action.setShortcut(QKeySequence("Ctrl+P"))
         self.process_all_action.triggered.connect(self.process_all_rows)
+        self.process_visible_action = QAction("Visible Rows", self)
+        self.process_visible_action.triggered.connect(self.process_visible_rows)
         self.process_current_action = QAction("Current", self)
         self.process_current_action.setShortcut(QKeySequence("Ctrl+Enter"))
         self.process_current_action.triggered.connect(self.preview_selected_row)
-        process_menu.addActions([self.process_all_action, self.process_current_action])
+        process_menu.addActions(
+            [self.process_all_action, self.process_visible_action, self.process_current_action]
+        )
 
     def _default_project(self) -> Project:
         return Project(csv=CsvConfig.from_dict(self.config.csv.to_dict()))
@@ -527,6 +549,9 @@ class MainWindow(QMainWindow):
         self.toggle_prompt_button.setText("Enabled" if prompt.enabled else "Disabled")
 
     def preview_selected_row(self) -> None:
+        if self._worker_thread is not None:
+            self.status.showMessage("Wait for the current cancellation to finish before starting another run.")
+            return
         prompt = self._current_prompt()
         if prompt is None:
             QMessageBox.warning(self, "No prompt", "Add or select a prompt first.")
@@ -540,21 +565,43 @@ class MainWindow(QMainWindow):
         self._start_worker(prompts=[prompt], row_specs=[(row_index, self.document.rows[row_index])])
 
     def process_all_rows(self) -> None:
+        self._process_rows(row_specs=[(index, row) for index, row in enumerate(self.document.rows)])
+
+    def process_visible_rows(self) -> None:
+        self._process_rows(row_specs=self._visible_row_specs())
+
+    def _process_rows(self, *, row_specs: list[tuple[int, dict[str, str]]]) -> None:
+        if self._worker_thread is not None:
+            self.status.showMessage("Wait for the current cancellation to finish before starting another run.")
+            return
         prompts = self._enabled_prompts()
         if not prompts:
             QMessageBox.warning(self, "No enabled prompts", "Enable at least one prompt first.")
             return
         if not self._validate_ready_for_generation(prompts):
             return
-        row_specs = self._visible_row_specs()
         if not row_specs:
             QMessageBox.warning(
                 self,
                 "No matching rows",
-                "No rows match the current table filter.",
+                "No rows are available for processing in the selected scope.",
             )
             return
+        if not self._confirm_large_processing_run(len(row_specs)):
+            return
         self._start_worker(prompts=prompts, row_specs=row_specs)
+
+    def _confirm_large_processing_run(self, row_count: int) -> bool:
+        if row_count <= 10:
+            return True
+        answer = QMessageBox.question(
+            self,
+            "Confirm processing",
+            f"This run will process {row_count} rows and may take a long time. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def _validate_ready_for_generation(self, prompts: list[ProjectPrompt]) -> bool:
         if not self.document.rows:
@@ -595,6 +642,7 @@ class MainWindow(QMainWindow):
             prompts=prompts,
             row_specs=row_specs,
         )
+        close_on_finish = len(row_specs) == 1 and len(prompts) == 1
         title = "Preview" if len(row_specs) == 1 and len(prompts) == 1 else "Processing"
         if len(row_specs) == 1 and len(prompts) == 1:
             status = f"Previewing '{prompts[0].output_field}' for row {row_specs[0][0] + 1}..."
@@ -603,11 +651,13 @@ class MainWindow(QMainWindow):
         self._activity_output_chars = 0
         self._activity_row_output_chars = {}
         self._activity_current_key = None
+        self._cancel_requested = False
         self._show_activity_dialog(
             title=title,
             status=status,
             total_records=total_records,
             input_chars=input_chars,
+            close_on_finish=close_on_finish,
         )
         self._set_busy(True)
         worker = GenerationWorker(
@@ -652,6 +702,8 @@ class MainWindow(QMainWindow):
         return (len(prompts) * len(row_specs), first_prompt.input_char_count)
 
     def _handle_prompt_started(self, row_index: int, output_field: str, input_chars: int) -> None:
+        if self._cancel_requested:
+            return
         key = (row_index, output_field)
         self._activity_current_key = key
         self._activity_output_chars = 0
@@ -664,6 +716,8 @@ class MainWindow(QMainWindow):
         dialog.set_status(f"Generating '{output_field}' for row {row_index + 1}...")
 
     def _handle_row_generated(self, row_index: int, output_field: str, content: str) -> None:
+        if self._cancel_requested:
+            return
         key = (row_index, output_field)
         streamed_chars = self._activity_row_output_chars.get(key, 0)
         actual_chars = len(content)
@@ -679,6 +733,8 @@ class MainWindow(QMainWindow):
             self._refresh_current_selection()
 
     def _handle_chunk_generated(self, row_index: int, output_field: str, chunk: str) -> None:
+        if self._cancel_requested:
+            return
         key = (row_index, output_field)
         if self._activity_current_key != key:
             self._activity_current_key = key
@@ -692,22 +748,29 @@ class MainWindow(QMainWindow):
         self._update_activity_output_stats()
 
     def _handle_worker_failed(self, message: str) -> None:
-        self._close_activity_dialog()
+        if self._cancel_requested:
+            self._handle_worker_cancelled()
+            return
+        self._close_activity_dialog(status="Failed", force_close=True)
         self._set_busy(False)
         self.status.showMessage("Generation failed")
         QMessageBox.critical(self, "Generation failed", message)
 
     def _handle_worker_completed(self) -> None:
-        self._close_activity_dialog()
+        self._cancel_requested = False
+        self._close_activity_dialog(status="Finished")
         self._set_busy(False)
         self.status.showMessage("Generation finished")
 
     def _handle_worker_cancelled(self) -> None:
-        self._close_activity_dialog()
+        self._cancel_requested = False
+        self._close_activity_dialog(status="Cancelled", force_close=True)
         self._set_busy(False)
         self.status.showMessage("Processing cancelled")
 
     def _handle_progress(self, completed: int, total: int) -> None:
+        if self._cancel_requested:
+            return
         dialog = self._activity_dialog
         if dialog is None:
             return
@@ -724,6 +787,7 @@ class MainWindow(QMainWindow):
         status: str,
         total_records: int,
         input_chars: int,
+        close_on_finish: bool,
     ) -> None:
         dialog = ActivityDialog(self)
         dialog.cancel_requested.connect(self._cancel_processing)
@@ -732,25 +796,39 @@ class MainWindow(QMainWindow):
             status=status,
             total_records=total_records,
             input_chars=input_chars,
+            close_on_finish=close_on_finish,
         )
         self._activity_dialog = dialog
 
-    def _close_activity_dialog(self) -> None:
+    def _close_activity_dialog(
+        self,
+        *,
+        status: str = "Finished",
+        force_close: bool = False,
+    ) -> None:
         if self._activity_dialog is None:
             return
-        self._activity_dialog.close_activity()
+        self._activity_dialog.finish_status(status)
+        self._activity_dialog.close_activity(force_close=force_close)
         self._activity_dialog = None
         self._activity_output_chars = 0
         self._activity_row_output_chars = {}
         self._activity_current_key = None
 
     def _cancel_processing(self) -> None:
+        self._cancel_requested = True
+        self._close_activity_dialog(status="Cancelling...", force_close=True)
+        self.status.showMessage("Cancelling...")
+        self._set_busy(False)
         if self._worker is not None:
             self._worker.cancel()
 
     def _clear_worker_state(self) -> None:
         self._worker = None
         self._worker_thread = None
+        # _worker_thread is now None, so calling _set_busy(False) will correctly
+        # re-enable process/preview buttons (gated on both _busy AND _worker_thread).
+        self._set_busy(False)
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
@@ -766,15 +844,21 @@ class MainWindow(QMainWindow):
             self.settings_action,
             self.edit_original_action,
             self.edit_result_action,
-            self.process_all_action,
-            self.process_current_action,
         ]:
             action.setEnabled(not busy)
+        processing_actions_enabled = not busy and self._worker_thread is None
+        for action in [
+            self.process_all_action,
+            self.process_visible_action,
+            self.process_current_action,
+        ]:
+            action.setEnabled(processing_actions_enabled)
 
     def _update_interactive_state(self) -> None:
         prompt = self._current_prompt()
         has_left_field = self.left_field_combo.count() > 0
         has_right_field = self.right_field_combo.count() > 0
+        processing_controls_enabled = not self._busy and self._worker_thread is None
 
         self.filter_button.setEnabled(not self._busy)
         self.add_prompt_button.setEnabled(not self._busy)
@@ -782,8 +866,11 @@ class MainWindow(QMainWindow):
         self.prompt_edit.setEnabled(not self._busy and prompt is not None)
         self.delete_prompt_button.setEnabled(not self._busy and prompt is not None)
         self.toggle_prompt_button.setEnabled(not self._busy and prompt is not None)
-        self.preview_button.setEnabled(not self._busy and prompt is not None)
-        self.process_button.setEnabled(not self._busy and bool(self._enabled_prompts()))
+        self.preview_button.setEnabled(processing_controls_enabled and prompt is not None)
+        self.process_button.setEnabled(processing_controls_enabled and bool(self._enabled_prompts()))
+        self.process_menu_button.setEnabled(
+            processing_controls_enabled and bool(self._enabled_prompts())
+        )
         self.left_field_combo.setEnabled(not self._busy and has_left_field)
         self.right_field_combo.setEnabled(not self._busy and has_right_field)
         self.edit_original_button.setEnabled(not self._busy and has_left_field)
