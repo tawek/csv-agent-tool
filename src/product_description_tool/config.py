@@ -123,6 +123,7 @@ class GenerationConfig:
     temperature: float = 0.2
     top_p: float = 1.0
     max_output_tokens: int = 500
+    enable_thinking: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GenerationConfig":
@@ -130,6 +131,7 @@ class GenerationConfig:
             temperature=float(data.get("temperature", 0.2)),
             top_p=float(data.get("top_p", 1.0)),
             max_output_tokens=int(data.get("max_output_tokens", 500)),
+            enable_thinking=bool(data.get("enable_thinking", False)),
         )
 
 

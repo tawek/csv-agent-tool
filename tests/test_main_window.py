@@ -345,6 +345,7 @@ def test_preview_activity_dialog_shows_active_provider_and_generation_settings(
     window.config.generation.temperature = 0.4
     window.config.generation.top_p = 0.85
     window.config.generation.max_output_tokens = 750
+    window.config.generation.enable_thinking = True
     csv_path = _write_csv(tmp_path)
     _import_window_csv(window, monkeypatch, csv_path)
     _add_prompt(window, output_field="generated", prompt="Rewrite {{sku}}")

@@ -32,6 +32,7 @@ class ProviderClient(ABC):
         temperature: float,
         top_p: float,
         max_output_tokens: int,
+        enable_thinking: bool,
         on_chunk: Callable[[str], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> str:
@@ -108,6 +109,7 @@ class OllamaProvider(ProviderClient):
         temperature: float,
         top_p: float,
         max_output_tokens: int,
+        enable_thinking: bool,
         on_chunk: Callable[[str], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> str:
@@ -122,6 +124,7 @@ class OllamaProvider(ProviderClient):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            "think": enable_thinking,
             "options": {
                 "temperature": temperature,
                 "top_p": top_p,
@@ -202,6 +205,7 @@ class OpenAIProvider(ProviderClient):
         temperature: float,
         top_p: float,
         max_output_tokens: int,
+        enable_thinking: bool,
         on_chunk: Callable[[str], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> str:

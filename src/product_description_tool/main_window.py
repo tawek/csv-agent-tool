@@ -1341,6 +1341,7 @@ class MainWindow(QMainWindow):
                     "temperature": self.config.generation.temperature,
                     "top_p": self.config.generation.top_p,
                     "max_output_tokens": self.config.generation.max_output_tokens,
+                    "enable_thinking": self.config.generation.enable_thinking,
                 },
                 "csv": self.project.csv.to_dict(),
             }

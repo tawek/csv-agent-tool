@@ -250,6 +250,7 @@ class GenerationService:
                 temperature=config.generation.temperature,
                 top_p=config.generation.top_p,
                 max_output_tokens=config.generation.max_output_tokens,
+                enable_thinking=config.generation.enable_thinking,
                 on_chunk=(lambda chunk: on_chunk(row_index, chunk)) if on_chunk is not None else None,
                 should_cancel=should_cancel,
             )
@@ -293,6 +294,7 @@ class GenerationService:
                         temperature=config.generation.temperature,
                         top_p=config.generation.top_p,
                         max_output_tokens=config.generation.max_output_tokens,
+                        enable_thinking=config.generation.enable_thinking,
                         on_chunk=(
                             (lambda chunk, current_index=row_index: on_chunk(current_index, chunk))
                             if on_chunk is not None

@@ -578,9 +578,13 @@ class SettingsDialog(QDialog):
         self.max_tokens_spin.setValue(self._config.generation.max_output_tokens)
         self._expand_control(self.max_tokens_spin, minimum_width=180)
 
+        self.enable_thinking_checkbox = QCheckBox()
+        self.enable_thinking_checkbox.setChecked(self._config.generation.enable_thinking)
+
         layout.addRow("Temperature", self.temperature_spin)
         layout.addRow("Top P", self.top_p_spin)
         layout.addRow("Max output tokens", self.max_tokens_spin)
+        layout.addRow("Enable thinking", self.enable_thinking_checkbox)
         self.tabs.addTab(tab, "Generation")
 
     def _build_csv_tab(self) -> None:
@@ -811,6 +815,7 @@ class SettingsDialog(QDialog):
                     "temperature": self.temperature_spin.value(),
                     "top_p": self.top_p_spin.value(),
                     "max_output_tokens": self.max_tokens_spin.value(),
+                    "enable_thinking": self.enable_thinking_checkbox.isChecked(),
                 },
                 "csv": {
                     "fields": {key: asdict(value) for key, value in csv_fields.items()},

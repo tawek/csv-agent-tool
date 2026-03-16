@@ -69,6 +69,7 @@ def test_ollama_provider_uses_chat_endpoint(monkeypatch: pytest.MonkeyPatch) -> 
         temperature=0.2,
         top_p=0.9,
         max_output_tokens=300,
+        enable_thinking=False,
         on_chunk=chunks.append,
     )
 
@@ -76,8 +77,44 @@ def test_ollama_provider_uses_chat_endpoint(monkeypatch: pytest.MonkeyPatch) -> 
     assert captured["method"] == "POST"
     assert captured["url"] == "http://localhost:11434/api/chat"
     assert captured["json"]["stream"] is True
+    assert captured["json"]["think"] is False
     assert captured["json"]["options"]["top_k"] == 20
     assert chunks == ["<p>Out", "put</p>"]
+
+
+def test_ollama_provider_can_enable_thinking(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            return None
+
+        def stream(self, method, url, json):
+            captured["json"] = json
+            return FakeStreamResponse([json_module.dumps({"message": {"content": "ok"}})])
+
+        def close(self) -> None:
+            return None
+
+    json_module = json
+    monkeypatch.setattr("product_description_tool.providers.httpx.Client", FakeClient)
+
+    provider = OllamaProvider(
+        base_url="http://localhost:11434",
+        model="llama3",
+        options={},
+    )
+    output = provider.generate(
+        system_prompt="system",
+        user_prompt="user",
+        temperature=0.2,
+        top_p=0.9,
+        max_output_tokens=300,
+        enable_thinking=True,
+    )
+
+    assert output == "ok"
+    assert captured["json"]["think"] is True
 
 
 def test_openai_provider_uses_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -117,6 +154,7 @@ def test_openai_provider_uses_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
         temperature=0.3,
         top_p=0.8,
         max_output_tokens=111,
+        enable_thinking=False,
         on_chunk=chunks.append,
     )
 
