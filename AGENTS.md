@@ -70,6 +70,14 @@ When a feature needs deeper explanation than a short README note, add or extend 
 - Provider changes should preserve streaming and cancellation behavior for both Ollama and OpenAI-compatible endpoints.
 - When changing prompt rendering or CSV field handling, verify both persistence and UI-selection flows because `MainWindow` ties them together tightly.
 
+## Spec-First Approach
+
+- `docs/specification.md` is the single source of truth for application behavior. Every feature, use case, and workflow is defined there first before implementation.
+- When adding or modifying functionality, update the specification document before writing code. The spec defines expected behavior, inputs, outputs, preconditions, postconditions, and error conditions.
+- When implementing a specification change, trace the relevant use case(s) and verify that the code satisfies all described flows and invariants.
+- When a bug is found, update the specification with the correct expected behavior before fixing the code. Do not silently patch behavior that deviates from the spec.
+- The specification includes architecture, data flow, component responsibilities, and key invariants. Use it to reason about impact before touching unrelated modules.
+
 ## Validation Expectations
 
 For most code changes, run:
