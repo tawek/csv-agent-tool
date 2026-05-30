@@ -242,6 +242,41 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Postconditions:** The prompt template text is updated in the project definition and will be persisted on next save.
 
+## Use Case 25: Maximize Prompt Editor
+
+**Actor:** User
+
+**Description:** The user toggles a maximized editing mode for the prompt editor that hides the CSV Data and Description panels, giving the prompt template text area and the CSV table full window space.
+
+**Trigger:** User clicks the maximize button (icon-only) next to the prompt selector in the Prompts panel header.
+
+**Preconditions:** The application window is open and the Prompts panel is visible.
+
+**Flow:**
+
+1. The user clicks the maximize button in the Prompts panel header.
+2. The CSV Data panel is collapsed (hidden).
+3. The Description panel is collapsed (hidden).
+4. The Prompts panel expands to fill the remaining window space.
+5. The prompt editor text area and CSV table receive the available height.
+6. The maximize button toggles to an "unmaximize" (restore) state.
+7. On subsequent click, the user restores the original layout:
+   - The CSV Data panel re-expands.
+   - The Description panel re-expands.
+   - The Prompts panel returns to its normal proportional size within the three-panel splitter.
+   - The maximize button returns to the "maximize" state.
+8. The button uses an icon (not text) to remain unobtrusive. The icon should suggest expanding/fullscreen (e.g., a maximize or expand icon).
+
+**Postconditions:** The window layout reflects the chosen state (maximized or restored). No data or functionality is affected — this is purely a UI layout change.
+
+**Error conditions:** No error conditions. If panels have different expanded states before toggling, maximize overrides them all; restore returns each panel to its previously expanded state.
+
+**Invariants:**
+- The maximize toggle is purely cosmetic — it does not affect data, processing, or any other application functionality.
+- On restore, each panel returns to the expanded state it had before maximize was engaged.
+- The maximize button is always visible in the Prompts panel header, next to the prompt selector dropdown and other prompt controls.
+- The button uses an icon only (no text label), consistent with the "unobtrusive" requirement.
+
 ## Use Case 11: Preview a Single Row
 
 **Actor:** User
@@ -548,6 +583,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 - The dirty flag (`_project_modified`) tracks unsaved changes and triggers save prompts on project switches.
 - Each field in `FieldConfig` may have `strip_html_whitespace=True`, which normalizes consecutive whitespace in the cell value to a single space during CSV export.
 - Prompt dependency ordering is computed at processing time: enabled prompts are topologically sorted by output-field dependencies, and cycles are detected before processing begins.
+- The prompt editor maximize toggle is purely cosmetic: it hides the CSV Data and Description panels, expands the Prompts panel, and restores previous panel states on unmaximize.
 
 ### Data Flow
 
