@@ -242,30 +242,31 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Postconditions:** The prompt template text is updated in the project definition and will be persisted on next save.
 
-## Use Case 25: Maximize Prompt Editor
+## Use Case 25: Maximize Pane
 
 **Actor:** User
 
-**Description:** The user toggles a maximized editing mode for the prompt editor that hides the CSV Data and Description panels, giving the prompt template text area and the CSV table full window space.
+**Description:** The user toggles a maximized mode for any pane, hiding the other two panes and giving the selected pane full window space.
 
-**Trigger:** User clicks the maximize button (icon-only) next to the prompt selector in the Prompts panel header.
+**Trigger:** User clicks the maximize button (icon-only) in any pane header.
 
-**Preconditions:** The application window is open and the Prompts panel is visible.
+**Preconditions:** The application window is open and at least one pane is visible.
 
 **Flow:**
 
-1. The user clicks the maximize button in the Prompts panel header.
-2. The CSV Data panel is collapsed (hidden).
-3. The Description panel is collapsed (hidden).
-4. The Prompts panel expands to fill the remaining window space.
-5. The prompt editor text area and CSV table receive the available height.
-6. The maximize button toggles to an "unmaximize" (restore) state.
-7. On subsequent click, the user restores the original layout:
-   - The CSV Data panel re-expands.
-   - The Description panel re-expands.
-   - The Prompts panel returns to its normal proportional size within the three-panel splitter.
-   - The maximize button returns to the "maximize" state.
-8. The button uses an icon (not text) to remain unobtrusive. The icon should suggest expanding/fullscreen (e.g., a maximize or expand icon).
+1. Each pane header includes a maximize button (icon-only, unobtrusive).
+2. The user clicks the maximize button on any pane (CSV Data, Prompts, or Description).
+3. The application saves the current expanded state of all three panes.
+4. The clicked pane expands to fill the window.
+5. The other two panes are collapsed (hidden).
+6. All three maximize buttons switch to a "restore" state (icon changes to indicate restoration).
+7. On subsequent click of any maximize button, the user restores the original layout:
+   - All three panes return to their previously saved expanded states.
+   - All maximize buttons return to the "maximize" state.
+8. If a pane is maximized and the user clicks another pane's maximize button:
+   - The current maximized state is restored first (all panes return to saved states).
+   - Then the newly clicked pane is maximized instead.
+9. The button uses an icon only (no text label), consistent with the "unobtrusive" requirement. Icons suggest expanding or restoring.
 
 **Postconditions:** The window layout reflects the chosen state (maximized or restored). No data or functionality is affected — this is purely a UI layout change.
 
@@ -273,8 +274,9 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Invariants:**
 - The maximize toggle is purely cosmetic — it does not affect data, processing, or any other application functionality.
-- On restore, each panel returns to the expanded state it had before maximize was engaged.
-- The maximize button is always visible in the Prompts panel header, next to the prompt selector dropdown and other prompt controls.
+- On restore, each panel returns to the expanded state it had before any maximize was engaged.
+- The maximize state is shared across all three panes — only one pane can be maximized at a time.
+- Each pane has its own maximize button in its header row.
 - The button uses an icon only (no text label), consistent with the "unobtrusive" requirement.
 
 ## Use Case 11: Preview a Single Row
@@ -583,7 +585,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 - The dirty flag (`_project_modified`) tracks unsaved changes and triggers save prompts on project switches.
 - Each field in `FieldConfig` may have `strip_html_whitespace=True`, which normalizes consecutive whitespace in the cell value to a single space during CSV export.
 - Prompt dependency ordering is computed at processing time: enabled prompts are topologically sorted by output-field dependencies, and cycles are detected before processing begins.
-- The prompt editor maximize toggle is purely cosmetic: it hides the CSV Data and Description panels, expands the Prompts panel, and restores previous panel states on unmaximize.
+- The pane maximize toggle is purely cosmetic: it hides the other two panes, expands the selected pane, and restores previous panel states on unmaximize.
 
 ### Data Flow
 
