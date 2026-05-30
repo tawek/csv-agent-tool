@@ -70,13 +70,56 @@ When a feature needs deeper explanation than a short README note, add or extend 
 - Provider changes should preserve streaming and cancellation behavior for both Ollama and OpenAI-compatible endpoints.
 - When changing prompt rendering or CSV field handling, verify both persistence and UI-selection flows because `MainWindow` ties them together tightly.
 
-## Spec-First Approach
+## Workflow: Spec-First, Two-Phase Commits
 
-- `docs/specification.md` is the single source of truth for application behavior. Every feature, use case, and workflow is defined there first before implementation.
-- When adding or modifying functionality, update the specification document before writing code. The spec defines expected behavior, inputs, outputs, preconditions, postconditions, and error conditions.
-- When implementing a specification change, trace the relevant use case(s) and verify that the code satisfies all described flows and invariants.
-- When a bug is found, update the specification with the correct expected behavior before fixing the code. Do not silently patch behavior that deviates from the spec.
-- The specification includes architecture, data flow, component responsibilities, and key invariants. Use it to reason about impact before touching unrelated modules.
+All changes follow a strict two-phase workflow with explicit review gates. **Never skip the spec update step or combine spec and implementation into a single commit.**
+
+### Mandatory Approval Gate
+
+**Before any code changes, you must present the spec update to the user and ask for explicit approval.** Do not proceed to implementation until the user clearly confirms the spec is correct. Never assume approval — always ask and wait for a direct affirmative.
+
+### Phase 1: Spec Change (Write First)
+
+When adding a feature or fixing a bug:
+
+1. **Understand the change.** Determine whether this is a new feature, a modification to existing behavior, or a bug fix.
+2. **Update `docs/specification.md`.**
+   - For new features: add a new Use Case section (numbered sequentially) describing the actor, trigger, preconditions, flow, postconditions, invariants, and error conditions.
+   - For bug fixes: update the relevant Use Case to describe the *correct* expected behavior (not the buggy current behavior). Add an "Error conditions" section if one is missing.
+   - For behavior modifications: update the affected Use Case(s) and any impacted invariants or data flow descriptions.
+3. **Ask for spec approval.** Present the spec changes to the user. Clearly describe what the spec change says and why. Do not write any code. Do not proceed until the user explicitly approves.
+
+### Phase 2: Implementation (After Spec Approval)
+
+Once the spec change is reviewed and approved:
+
+4. **Plan the implementation.** Trace the relevant Use Case(s) and identify which modules, classes, and methods will be affected. Reference specific lines in the spec (Use Case number, flow step) to show how each part of the implementation satisfies a requirement.
+5. **Implement the code.** Make the minimum changes needed to satisfy the spec. Follow existing patterns and conventions.
+6. **Write or update tests.** Cover the new or modified behavior, especially in `tests/test_main_window.py` for UI flows.
+7. **Run validation.** Execute the test suite:
+   ```bash
+   QT_QPA_PLATFORM=offscreen PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1 uv run pytest
+   ```
+   For packaging changes, also run PyInstaller.
+8. **Submit the implementation for review.** Show the code changes, tests, and test results. Reference the Use Case numbers and flow steps the implementation satisfies.
+
+### Commit Discipline
+
+- **Commit 1:** Spec-only changes (`docs/specification.md`). Message should reference the Use Case number(s) being added or modified.
+- **Commit 2:** Implementation changes (code + tests). Message should reference the same Use Case number(s) and note that they follow the approved spec update.
+- **Never** put spec and implementation in the same commit unless explicitly instructed (e.g., for emergency hotfixes with no review path).
+
+### Bug Fix Variant
+
+For bug fixes, the workflow is:
+
+1. Update the spec to describe the *correct* behavior (not the buggy behavior).
+2. Review and commit the spec update.
+3. Implement the fix to match the updated spec.
+4. Add regression tests if appropriate.
+5. Review and commit the implementation.
+
+This ensures the spec always reflects the desired behavior, not whatever is currently broken.
 
 ## Validation Expectations
 

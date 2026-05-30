@@ -25,7 +25,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
    - **OpenAI-compatible:** Base URL, API key, model name, and arbitrary options JSON.
 4. The user can refresh the model list from the active provider endpoint via a refresh button.
 5. The user sets generation parameters: temperature (0.0-2.0), top-p (0.0-1.0), max output tokens (1-200000).
-6. The user configures CSV I/O: original description column name, delimiter, quote char, encoding, newline character, and whether to write headers.
+6. The user configures CSV I/O: original description column name, delimiter, quote char, encoding, newline character, whether to write headers, and the default state of the "export only visible rows" checkbox (a boolean option).
 7. The user manages per-column visibility and display labels through an editable table of fields. They may reset the fields table to match the currently loaded CSV headers.
 8. The user confirms or cancels. On confirm, the provider config and generation config are saved to the persistent `ConfigStore` (JSON on disk). The project-scoped `CsvConfig` is applied to the working document and table model.
 
@@ -121,19 +121,50 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Actor:** User
 
-**Description:** The user writes the current `CsvDocument` (including any generated columns) to a CSV file.
+**Description:** The user writes the current `CsvDocument` (including any generated columns) to a CSV file, choosing whether to export all rows or only visible (unfiltered) rows.
 
-**Trigger:** User selects **CSV > Export** or **CSV > Export As**.
+**Trigger:** User clicks the **Export** button in the CSV Data panel or selects **CSV > Export** from the menu bar.
 
 **Preconditions:** A `CsvDocument` with headers and rows is loaded.
 
 **Flow:**
 
-1. For **Export**, the file is written to `current_external_csv_path` if it is set. For **Export As**, a file dialog prompts for a destination.
-2. The `CsvRepository.save()` method writes all document headers and rows using the project's `CsvConfig`.
-3. The status bar shows confirmation of the export location.
+1. The application determines the initial target path: if the project has a saved `export_path` in its CSV config, that value is used; otherwise the target path defaults to the project's sibling CSV file (derived from the `.project.json` path). If no project is loaded (standalone import), the field starts empty.
+2. An `ExportDialog` opens with the following controls:
+   - A **target path** text field pre-populated with the resolved target path from step 1.
+   - A **Browse** button next to the target path field that opens a file save dialog to set the destination path.
+   - An **"Export only visible rows"** checkbox. The default state is determined by: first check the `export_only_visible` setting from the project CSV config; if not set, fall back to checking whether active filters exist (i.e., `filter_patterns` is non-empty).
+   - An **Export** button and a **Cancel** button.
+3. The user may adjust the target path by typing or clicking **Browse**.
+4. The user checks or unchecks the visibility option.
+5. The user clicks **Export**:
+   5a. If the target path is empty, the export is aborted and a warning is shown; the dialog remains open.
+   5b. If the target file already exists on disk, an overwrite confirmation dialog is shown with a message indicating the file will be replaced.
+      - If the user confirms overwrite, the export proceeds.
+      - If the user declines, the overwrite dialog closes and the user returns to the export dialog.
+   5c. The appropriate subset of rows is collected:
+      - If **Export only visible rows** is checked, the application iterates over the proxy model's visible rows, mapping each back to its source row index via `proxy_model.mapToSource()`, and builds a `CsvDocument` containing only those rows.
+      - If the checkbox is unchecked, the full `CsvDocument` is used.
+   5d. If no visible rows exist and the checkbox is checked, a warning dialog is shown and the export is aborted; the export dialog remains open.
+   5e. The `CsvRepository.save()` method writes the (possibly filtered) `CsvDocument` to the target path using the project's `CsvConfig`.
+   5f. The `export_path` is updated in the project's CSV config to the target path, and the dirty flag is set so the change is persisted on next project save.
+   5g. The dialog closes.
+6. The status bar shows confirmation of the export location and the number of rows exported.
 
-**Postconditions:** The CSV file exists on disk with the current state of the working document.
+**Postconditions:** The CSV file exists on disk with the selected rows from the working document.
+
+**Error conditions:**
+- Empty target path: export is aborted, dialog remains open, a warning is shown.
+- All rows filtered out and "only visible" is checked: export is aborted, dialog remains open, a warning is shown.
+- Write failure (disk full, permissions, etc.): a critical error dialog is shown and the export is aborted.
+
+**Invariants:**
+- The exported CSV always includes all column headers from the original document, even if some columns are hidden in the UI (column visibility does not affect export).
+- The checkbox state and target path are independent — changing one does not reset the other.
+- The export dialog remains open on any error or abort, allowing the user to correct the issue.
+- Exporting visible rows creates a temporary in-memory `CsvDocument` and never modifies `self.document`.
+- The `export_path` is stored in the project's CSV config and persists across sessions. On a standalone (non-project) CSV import, `export_path` is not persisted to disk but `current_external_csv_path` is updated in memory.
+- The initial target path for export is always the input CSV path; the user must explicitly change it via typing or Browse.
 
 ## Use Case 7: Add a Prompt
 
@@ -429,6 +460,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 | `ActivityDialog` | `dialogs.py` | Progress, stats, and cancellation UI during generation |
 | `SettingsDialog` | `dialogs.py` | Provider, generation, and CSV configuration UI |
 | `FilterDialog` | `dialogs.py` | Per-column wildcard text filtering UI |
+| `ExportDialog` | `dialogs.py` | Target path selection, visibility checkbox, and overwrite confirmation for CSV export |
 | `HtmlEditorDialog` | `dialogs.py` | Manual HTML cell editing with syntax highlighting |
 | `WildcardFilterProxyModel` | `filter_proxy.py` | Qt proxy model for case-insensitive fnmatch filtering |
 | `CsvTableModel` | `table_model.py` | Qt table model backing the CSV data grid |
