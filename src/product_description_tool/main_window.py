@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QThread, QTimer, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -15,12 +15,14 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QMenu,
+    QStyle,
     QPushButton,
     QPlainTextEdit,
     QSplitter,
     QStatusBar,
     QTableView,
     QVBoxLayout,
+    QToolButton,
     QWidget,
 )
 
@@ -72,6 +74,8 @@ class MainWindow(QMainWindow):
         self._busy = False
         self._project_modified = False
         self._updating_prompt_ui = False
+        self._prompt_editor_maximized = False
+        self._prompt_editor_maximized_states: dict[str, bool] = {}
         self.filter_patterns: dict[str, str] = {}
 
         self.table_model = CsvTableModel()
@@ -79,6 +83,7 @@ class MainWindow(QMainWindow):
         self.proxy_model.setSourceModel(self.table_model)
 
         self._build_ui()
+        self._set_prompt_editor_maximize_icon()
         self._sync_project_with_document()
         self._refresh_prompt_controls()
         self._refresh_table_from_document()
@@ -152,6 +157,13 @@ class MainWindow(QMainWindow):
         self.toggle_prompt_button.setCheckable(True)
         self.toggle_prompt_button.clicked.connect(self.toggle_current_prompt_enabled)
         prompt_header.addWidget(self.toggle_prompt_button)
+
+        self.maximize_prompt_editor_button = QToolButton()
+        self.maximize_prompt_editor_button.setToolTip("Maximize prompt editor")
+        self.maximize_prompt_editor_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.maximize_prompt_editor_button.setCheckable(True)
+        self.maximize_prompt_editor_button.clicked.connect(self._toggle_prompt_editor_maximize)
+        prompt_header.addWidget(self.maximize_prompt_editor_button)
 
         prompt_header.addStretch(1)
 
@@ -1258,6 +1270,41 @@ class MainWindow(QMainWindow):
                 continue
             sizes.append(max(panel.header_height() * 2, remaining_height // len(expanded_panels)))
         self.sections_splitter.setSizes(sizes)
+
+    def _set_prompt_editor_maximize_icon(self) -> None:
+        self.maximize_prompt_editor_button.setToolTip("Maximize prompt editor")
+        self.maximize_prompt_editor_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
+        )
+
+    def _toggle_prompt_editor_maximize(self) -> None:
+        if not self._prompt_editor_maximized:
+            self._prompt_editor_maximized = True
+            self._prompt_editor_maximized_states = {
+                "csv": self.csv_panel.expanded,
+                "prompt": self.prompt_panel.expanded,
+                "description": self.description_panel.expanded,
+            }
+            self.csv_panel.set_expanded(False)
+            self.prompt_panel.set_expanded(True)
+            self.description_panel.set_expanded(False)
+            self.maximize_prompt_editor_button.setToolTip("Restore prompt editor")
+            self.maximize_prompt_editor_button.setIcon(
+                self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack)
+            )
+        else:
+            self._prompt_editor_maximized = False
+            for key, expanded in self._prompt_editor_maximized_states.items():
+                panel = {
+                    "csv": self.csv_panel,
+                    "prompt": self.prompt_panel,
+                    "description": self.description_panel,
+                }[key]
+                panel.set_expanded(expanded)
+            self.maximize_prompt_editor_button.setToolTip("Maximize prompt editor")
+            self.maximize_prompt_editor_button.setIcon(
+                self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
+            )
 
     def _sync_filter_patterns_with_visible_columns(self) -> None:
         visible_headers = set(self.table_model.visible_headers)

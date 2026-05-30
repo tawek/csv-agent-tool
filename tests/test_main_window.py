@@ -725,3 +725,67 @@ def test_process_all_aborts_on_cyclic_prompt_dependencies(qtbot, tmp_path: Path,
     title, text = critical_messages[0]
     assert "Cyclic" in text
     assert window._activity_dialog is None
+
+
+def test_prompt_editor_maximize_copies_other_panels(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    assert window.csv_panel.expanded
+    assert window.prompt_panel.expanded
+    assert window.description_panel.expanded
+    assert not window._prompt_editor_maximized
+
+    window.maximize_prompt_editor_button.click()
+
+    assert window._prompt_editor_maximized
+    assert not window.csv_panel.expanded
+    assert window.prompt_panel.expanded
+    assert not window.description_panel.expanded
+    assert "Restore" in window.maximize_prompt_editor_button.toolTip()
+
+
+def test_prompt_editor_unmaximize_restores_previous_states(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    window.maximize_prompt_editor_button.click()
+    assert window._prompt_editor_maximized
+    assert not window.csv_panel.expanded
+
+    window.maximize_prompt_editor_button.click()
+
+    assert not window._prompt_editor_maximized
+    assert window.csv_panel.expanded
+    assert window.prompt_panel.expanded
+    assert window.description_panel.expanded
+    assert "Maximize" in window.maximize_prompt_editor_button.toolTip()
+
+
+def test_prompt_editor_maximize_restores_different_states(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    window.csv_panel.set_expanded(False)
+    assert not window.csv_panel.expanded
+    assert window.prompt_panel.expanded
+    assert window.description_panel.expanded
+
+    window.maximize_prompt_editor_button.click()
+    assert window._prompt_editor_maximized
+
+    window.maximize_prompt_editor_button.click()
+
+    assert not window._prompt_editor_maximized
+    assert not window.csv_panel.expanded
+    assert window.prompt_panel.expanded
+    assert window.description_panel.expanded
