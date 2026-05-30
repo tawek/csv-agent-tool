@@ -474,6 +474,42 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 - The checkbox is per-column and persists in the project file via `FieldConfig`.
 - Normalization uses `re.sub(r'\s+', ' ', value).strip()` — all Unicode whitespace sequences collapse to a single space.
 
+## Use Case 24: Prompt Dependency Ordering
+
+**Actor:** User
+
+**Description:** When processing multiple prompts, the application detects dependencies between them (where one prompt's template references another prompt's output column) and processes them in the correct order.
+
+**Trigger:** Automatic when the user initiates batch processing (Process All, Process Visible Rows, or Preview).
+
+**Preconditions:** At least one prompt is enabled. Prompts may reference each other's output columns via `{{output_field}}` placeholders.
+
+**Flow:**
+
+1. Before starting processing, the application builds a dependency graph among enabled prompts:
+   - For each prompt, extract all placeholders from its template using `PromptRenderer.extract_placeholders()`.
+   - If a placeholder matches the `output_field` of another enabled prompt, a dependency edge is created (this prompt depends on the referenced prompt).
+2. The application computes a topological ordering of the prompts based on the dependency graph:
+   - Prompts with no dependencies are processed first.
+   - A prompt is processed only after all its dependencies have been processed.
+3. If a cycle is detected during ordering:
+   - The application identifies all prompts participating in the cycle.
+   - A critical error dialog is shown listing the cyclic prompts and their dependencies.
+   - Processing is aborted; no rows are processed.
+4. If a prompt references its own output field (e.g., `{{seo_description}}` in a prompt with `output_field="seo_description"`), this is treated as a self-cycle and reported accordingly.
+5. On successful ordering, the prompts are re-ordered before being passed to the worker. The dependency information is not persisted — ordering is computed at processing time.
+
+**Postconditions:** Prompts are processed in dependency order, ensuring that referenced output columns contain data from earlier prompts.
+
+**Error conditions:**
+- Cyclic dependencies: processing is aborted with an error dialog listing the cycle participants.
+- A prompt references an output field that does not exist: the placeholder validation (Use Case 11) catches this and shows an error before ordering is attempted.
+
+**Invariants:**
+- Only enabled prompts participate in the dependency graph.
+- The dependency ordering is ephemeral — it is computed fresh for each processing run and not persisted in the project file.
+- A prompt is considered dependent on another prompt if its template contains a placeholder matching the other prompt's `output_field` name.
+
 ## Architecture Summary
 
 ### Components
@@ -511,6 +547,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 - Generation parameters (temperature, top_p, max_output_tokens) apply to all providers and are shared across prompts in a single run.
 - The dirty flag (`_project_modified`) tracks unsaved changes and triggers save prompts on project switches.
 - Each field in `FieldConfig` may have `strip_html_whitespace=True`, which normalizes consecutive whitespace in the cell value to a single space during CSV export.
+- Prompt dependency ordering is computed at processing time: enabled prompts are topologically sorted by output-field dependencies, and cycles are detected before processing begins.
 
 ### Data Flow
 
@@ -524,6 +561,7 @@ User adds prompt
   → FieldConfig created → Table columns expanded
 
 User previews / processes
+  → Prompt dependency graph built and topologically sorted (or cycle detected)
   → GenerationService.prepare_prompt() → PromptRenderer.render()
   → ProviderClient.generate() → Streaming chunks
   → GenerationWorker.row_generated → TableModel.set_cell()
