@@ -616,8 +616,8 @@ class SettingsDialog(QDialog):
         columns_row.addWidget(self.reset_columns_button)
         layout.addLayout(columns_row)
 
-        self.fields_table = QTableWidget(0, 3)
-        self.fields_table.setHorizontalHeaderLabels(["Header", "Visible", "Label"])
+        self.fields_table = QTableWidget(0, 4)
+        self.fields_table.setHorizontalHeaderLabels(["Header", "Visible", "Label", "Strip whitespace on export"])
         self.fields_table.verticalHeader().setVisible(False)
         self.fields_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.fields_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -660,11 +660,23 @@ class SettingsDialog(QDialog):
             label_item = QTableWidgetItem(field_config.label or header)
             self.fields_table.setItem(row_index, 2, label_item)
 
+            strip_item = QTableWidgetItem()
+            strip_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            strip_item.setCheckState(
+                Qt.CheckState.Checked if field_config.strip_html_whitespace else Qt.CheckState.Unchecked
+            )
+            self.fields_table.setItem(row_index, 3, strip_item)
+
     def _reset_columns_from_current_csv(self) -> None:
         if not self._current_headers:
             return
         self._config.csv.fields = {
-            header: FieldConfig(label=header, show=True) for header in self._current_headers
+            header: FieldConfig(label=header, show=True, strip_html_whitespace=False)
+            for header in self._current_headers
         }
         self._populate_fields_table()
         self.fields_table.resizeColumnsToContents()
@@ -675,13 +687,20 @@ class SettingsDialog(QDialog):
             header_item = self.fields_table.item(row_index, 0)
             visible_item = self.fields_table.item(row_index, 1)
             label_item = self.fields_table.item(row_index, 2)
+            strip_item = self.fields_table.item(row_index, 3)
             if header_item is None or visible_item is None:
                 continue
             header = header_item.text()
             label = label_item.text().strip() if label_item is not None else header
+            strip_whitespace = (
+                strip_item.checkState() == Qt.CheckState.Checked
+                if strip_item is not None
+                else False
+            )
             fields[header] = FieldConfig(
                 label=label or header,
                 show=visible_item.checkState() == Qt.CheckState.Checked,
+                strip_html_whitespace=strip_whitespace,
             )
         return fields
 

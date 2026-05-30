@@ -12,10 +12,15 @@ from platformdirs import user_config_dir
 class FieldConfig:
     label: str | None = None
     show: bool = True
+    strip_html_whitespace: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "FieldConfig":
-        return cls(label=data.get("label"), show=bool(data.get("show", True)))
+        return cls(
+            label=data.get("label"),
+            show=bool(data.get("show", True)),
+            strip_html_whitespace=bool(data.get("strip_html_whitespace", False)),
+        )
 
 
 @dataclass(slots=True)

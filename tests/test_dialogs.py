@@ -42,6 +42,37 @@ def test_settings_dialog_collects_visibility_and_labels_from_table(qtbot) -> Non
     assert updated.csv.quotechar == '"'
 
 
+def test_settings_dialog_collects_strip_whitespace_checkbox(qtbot) -> None:
+    config = AppConfig()
+    dialog = SettingsDialog(
+        config,
+        current_headers=["sku", "description"],
+    )
+    qtbot.addWidget(dialog)
+
+    dialog.fields_table.item(0, 3).setCheckState(Qt.CheckState.Unchecked)
+    dialog.fields_table.item(1, 3).setCheckState(Qt.CheckState.Checked)
+    updated = dialog.get_config()
+
+    assert updated.csv.fields["sku"].strip_html_whitespace is False
+    assert updated.csv.fields["description"].strip_html_whitespace is True
+
+
+def test_settings_dialog_reset_clears_strip_whitespace(qtbot) -> None:
+    config = AppConfig()
+    dialog = SettingsDialog(
+        config,
+        current_headers=["sku", "description"],
+    )
+    qtbot.addWidget(dialog)
+
+    dialog._reset_columns_from_current_csv()
+    updated = dialog.get_config()
+
+    assert updated.csv.fields["sku"].strip_html_whitespace is False
+    assert updated.csv.fields["description"].strip_html_whitespace is False
+
+
 def test_activity_dialog_can_be_closed_after_finish_when_close_on_finish_is_off(qtbot) -> None:
     dialog = ActivityDialog()
     qtbot.addWidget(dialog)

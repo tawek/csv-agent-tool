@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -63,7 +64,13 @@ class CsvRepository:
             if config.write_header:
                 writer.writeheader()
             for row in document.rows:
-                output = {header: row.get(header, "") for header in headers}
+                output = {}
+                for header in headers:
+                    value = row.get(header, "")
+                    field_config = config.fields.get(header)
+                    if field_config and field_config.strip_html_whitespace:
+                        value = re.sub(r"\s+", " ", value).strip()
+                    output[header] = value
                 writer.writerow(output)
 
     def ensure_column(self, document: CsvDocument, column_name: str) -> None:
