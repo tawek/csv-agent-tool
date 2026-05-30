@@ -25,7 +25,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
    - **OpenAI-compatible:** Base URL, API key, model name, and arbitrary options JSON.
 4. The user can refresh the model list from the active provider endpoint via a refresh button.
 5. The user sets generation parameters: temperature (0.0-2.0), top-p (0.0-1.0), max output tokens (1-200000).
-6. The user configures CSV I/O: delimiter, quote char, encoding, newline character, whether to write headers, and the default state of the "export only visible rows" checkbox (a boolean option).
+6. The user configures CSV I/O: delimiter (`;` by default), quote char, encoding, newline character, whether to write headers, and the default state of the "export only visible rows" checkbox (a boolean option).
 7. The user manages per-column visibility and display labels through an editable table of fields. They may reset the fields table to match the currently loaded CSV headers.
 8. The user confirms or cancels. On confirm, the provider config and generation config are saved to the persistent `ConfigStore` (JSON on disk). The project-scoped `CsvConfig` is applied to the working document and table model.
 
@@ -479,6 +479,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 - The sibling CSV file (`*.csv`) and the `.project.json` form a single project unit. They are saved and loaded together.
 - Filtering affects the table view display and the scope of "Process Visible Rows". It does not modify or remove data.
 - Prompt templates can reference any CSV column by name via `{{column_name}}` placeholders.
+- The default CSV delimiter is `;` (semicolon). New projects and fresh installs use this delimiter unless the user changes it in Settings.
 - Generation parameters (temperature, top_p, max_output_tokens) apply to all providers and are shared across prompts in a single run.
 - The dirty flag (`_project_modified`) tracks unsaved changes and triggers save prompts on project switches.
 
@@ -486,7 +487,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 ```
 User imports CSV
-  → CsvRepository.load() → CsvDocument (headers + rows)
+  → CsvRepository.load() → CsvDocument (headers + rows, dialect inferred or using configured `;` delimiter)
   → CsvTableModel.set_document() → Table view renders
 
 User adds prompt
