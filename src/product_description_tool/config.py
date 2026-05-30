@@ -22,6 +22,8 @@ class FieldConfig:
 class CsvConfig:
     original_description: str = "description"
     result_description: str = ""
+    export_path: str = ""
+    export_only_visible: bool = False
     fields: dict[str, FieldConfig] = field(default_factory=dict)
     delimiter: str = ","
     quotechar: str = '"'
@@ -38,6 +40,8 @@ class CsvConfig:
         return cls(
             original_description=data.get("original-description", "description"),
             result_description=data.get("result-description", ""),
+            export_path=data.get("export-path", ""),
+            export_only_visible=bool(data.get("export-only-visible", False)),
             fields=fields,
             delimiter=data.get("delimiter", ",") or ",",
             quotechar=data.get("quotechar", '"') or '"',
@@ -50,6 +54,8 @@ class CsvConfig:
         return {
             "original-description": self.original_description,
             "result-description": self.result_description,
+            "export-path": self.export_path,
+            "export-only-visible": self.export_only_visible,
             "fields": {
                 key: asdict(value)
                 for key, value in self.fields.items()

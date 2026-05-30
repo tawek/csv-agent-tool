@@ -110,12 +110,16 @@ class MainWindow(QMainWindow):
         csv_layout.setContentsMargins(0, 0, 0, 0)
         csv_layout.setSpacing(8)
 
-        table_actions = QHBoxLayout()
+        csv_actions_layout = QHBoxLayout()
         self.filter_button = QPushButton("Filter")
         self.filter_button.clicked.connect(self.open_filter_dialog)
-        table_actions.addWidget(self.filter_button)
-        table_actions.addStretch(1)
-        csv_layout.addLayout(table_actions)
+        csv_actions_layout.addWidget(self.filter_button)
+        csv_actions_layout.addStretch(1)
+
+        self.export_button = QPushButton("Export")
+        self.export_button.clicked.connect(self._export_csv)
+        csv_actions_layout.addWidget(self.export_button)
+        csv_layout.addLayout(csv_actions_layout)
 
         self.table_view = QTableView()
         self.table_view.setModel(self.proxy_model)
@@ -268,10 +272,8 @@ class MainWindow(QMainWindow):
         self.load_csv_action = QAction("Import", self)
         self.load_csv_action.triggered.connect(self.load_csv)
         self.store_csv_action = QAction("Export", self)
-        self.store_csv_action.triggered.connect(self.save_csv)
-        self.store_csv_as_action = QAction("Export As", self)
-        self.store_csv_as_action.triggered.connect(lambda checked=False: self.save_csv(save_as=True))
-        csv_menu.addActions([self.load_csv_action, self.store_csv_action, self.store_csv_as_action])
+        self.store_csv_action.triggered.connect(self._export_csv)
+        csv_menu.addActions([self.load_csv_action, self.store_csv_action])
 
         edit_menu = menu_bar.addMenu("Edit")
         self.settings_action = QAction("Settings", self)
@@ -401,25 +403,56 @@ class MainWindow(QMainWindow):
         self._set_project_modified(True)
         self.status.showMessage(f"Imported {len(self.document.rows)} rows from {path}")
 
-    def save_csv(self, save_as: bool = False) -> None:
-        target_path = None if save_as else self.current_external_csv_path
-        if target_path is None:
-            path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Export CSV",
-                str(self.current_external_csv_path or ""),
-                "CSV Files (*.csv);;All Files (*)",
-            )
-            if not path:
-                return
-            target_path = Path(path)
+    def _export_csv(self) -> None:
+        initial_path = self.project.csv.export_path
+        if not initial_path and self.current_external_csv_path:
+            initial_path = str(self.current_external_csv_path)
+        if not initial_path:
+            initial_path = ""
+
+        default_only_visible = self.project.csv.export_only_visible
+        if not default_only_visible and self.filter_patterns:
+            default_only_visible = True
+
+        visible_rows = self._visible_row_specs()
+        has_visible_rows = len(visible_rows) > 0
+
+        from product_description_tool.dialogs import ExportDialog
+
+        dialog = ExportDialog(
+            target_path=initial_path,
+            default_only_visible=default_only_visible,
+            has_visible_rows=has_visible_rows,
+            parent=self,
+        )
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        target_path_str, export_only_visible = dialog.get_result()
+        target_path = Path(target_path_str)
+
         try:
-            self.csv_repository.save(target_path, self.document, self.project.csv)
+            if export_only_visible:
+                visible_rows_dict = [row for _, row in visible_rows]
+                export_doc = CsvDocument(
+                    headers=list(self.document.headers),
+                    rows=visible_rows_dict,
+                    dialect=self.document.dialect,
+                )
+            else:
+                export_doc = self.document
+
+            self.csv_repository.save(target_path, export_doc, self.project.csv)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Export failed", str(exc))
             return
-        self.current_external_csv_path = Path(target_path)
-        self.status.showMessage(f"Exported CSV to {target_path}")
+
+        self.project.csv.export_path = str(target_path)
+        if export_doc is self.document:
+            self.current_external_csv_path = target_path
+        self._set_project_modified(True)
+        self.status.showMessage(f"Exported {len(export_doc.rows)} rows to {target_path}")
 
     def open_settings(self) -> None:
         selected_source_row = self._selected_source_row()
@@ -863,7 +896,6 @@ class MainWindow(QMainWindow):
             self.save_project_as_action,
             self.load_csv_action,
             self.store_csv_action,
-            self.store_csv_as_action,
             self.settings_action,
             self.edit_original_action,
             self.edit_result_action,

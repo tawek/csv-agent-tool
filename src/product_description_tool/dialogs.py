@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QTimer, Qt, Signal
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -603,6 +605,9 @@ class SettingsDialog(QDialog):
         form.addRow("Encoding", self.encoding_edit)
         form.addRow("Newline", self.newline_edit)
         form.addRow("Write header", self.write_header_checkbox)
+        self.export_only_visible_checkbox = QCheckBox()
+        self.export_only_visible_checkbox.setChecked(self._config.csv.export_only_visible)
+        form.addRow("Export only visible rows (default)", self.export_only_visible_checkbox)
         layout.addLayout(form)
 
         columns_row = QHBoxLayout()
@@ -754,7 +759,92 @@ class SettingsDialog(QDialog):
                     "encoding": self.encoding_edit.text().strip() or "utf-8-sig",
                     "newline": self.newline_edit.text(),
                     "write_header": self.write_header_checkbox.isChecked(),
+                    "export-only-visible": self.export_only_visible_checkbox.isChecked(),
                 },
             }
         )
         return config
+
+
+class ExportDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        target_path: str,
+        default_only_visible: bool,
+        has_visible_rows: bool,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setModal(True)
+        self.setWindowTitle("Export CSV")
+        self.resize(500, 140)
+
+        self._target_path = target_path
+        self._export_only_visible = default_only_visible
+        self._confirmed = False
+
+        layout = QVBoxLayout(self)
+
+        path_layout = QHBoxLayout()
+        path_layout.addWidget(QLabel("Target path:"))
+        self.path_edit = QLineEdit(target_path)
+        path_layout.addWidget(self.path_edit)
+        browse_button = QPushButton("Browse")
+        browse_button.clicked.connect(self._browse_path)
+        path_layout.addWidget(browse_button)
+        layout.addLayout(path_layout)
+
+        self.visible_checkbox = QCheckBox("Export only visible rows")
+        self.visible_checkbox.setChecked(default_only_visible)
+        self.visible_checkbox.setEnabled(has_visible_rows)
+        layout.addWidget(self.visible_checkbox)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch(1)
+        self.export_button = QPushButton("Export")
+        self.export_button.clicked.connect(self._on_export)
+        button_layout.addWidget(self.export_button)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+
+    def _browse_path(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export CSV",
+            self.path_edit.text(),
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if path:
+            self.path_edit.setText(path)
+
+    def _on_export(self) -> None:
+        target = self.path_edit.text().strip()
+        if not target:
+            QMessageBox.warning(self, "Export", "Target path must not be empty.")
+            return
+
+        self._export_only_visible = self.visible_checkbox.isChecked()
+        file_exists = Path(target).exists()
+
+        if file_exists:
+            reply = QMessageBox.question(
+                self,
+                "Confirm Overwrite",
+                f"File '{target}' already exists. Overwrite?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        if self._export_only_visible and not self.visible_checkbox.isEnabled():
+            QMessageBox.warning(self, "Export", "No visible rows to export.")
+            return
+
+        self._confirmed = True
+        self.accept()
+
+    def get_result(self) -> tuple[str, bool]:
+        return (self.path_edit.text().strip(), self.visible_checkbox.isChecked())

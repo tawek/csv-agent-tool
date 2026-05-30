@@ -1,7 +1,8 @@
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDialog
 
 from product_description_tool.config import AppConfig, FieldConfig
-from product_description_tool.dialogs import ActivityDialog, SettingsDialog
+from product_description_tool.dialogs import ActivityDialog, ExportDialog, SettingsDialog
 
 
 def test_settings_dialog_reset_from_current_csv_populates_visible_columns(qtbot) -> None:
@@ -185,3 +186,80 @@ def test_settings_dialog_refreshes_openai_model_choices(qtbot, monkeypatch) -> N
     assert dialog.openai_model_combo.itemText(0) == "gpt-5"
     assert dialog.openai_model_combo.itemText(1) == "gpt-5-mini"
     assert dialog.openai_model_combo.currentText() == "custom-model"
+
+
+def test_export_dialog_has_correct_initial_values(qtbot) -> None:
+    dialog = ExportDialog(
+        target_path="/tmp/output.csv",
+        default_only_visible=True,
+        has_visible_rows=True,
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog.path_edit.text() == "/tmp/output.csv"
+    assert dialog.visible_checkbox.isChecked() is True
+    assert dialog.visible_checkbox.isEnabled() is True
+
+
+def test_export_dialog_checkbox_disabled_when_no_visible_rows(qtbot) -> None:
+    dialog = ExportDialog(
+        target_path="/tmp/output.csv",
+        default_only_visible=False,
+        has_visible_rows=False,
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog.visible_checkbox.isEnabled() is False
+
+
+def test_export_dialog_get_result(qtbot) -> None:
+    dialog = ExportDialog(
+        target_path="/tmp/output.csv",
+        default_only_visible=False,
+        has_visible_rows=True,
+    )
+    qtbot.addWidget(dialog)
+
+    dialog.path_edit.setText("/tmp/new_output.csv")
+    dialog.visible_checkbox.setChecked(True)
+
+    dialog.accept()
+
+    result_path, result_visible = dialog.get_result()
+
+    assert result_path == "/tmp/new_output.csv"
+    assert result_visible is True
+
+
+def test_export_dialog_rejects_on_cancel(qtbot) -> None:
+    dialog = ExportDialog(
+        target_path="/tmp/output.csv",
+        default_only_visible=False,
+        has_visible_rows=True,
+    )
+    qtbot.addWidget(dialog)
+
+    dialog.cancel_button.click()
+
+    assert dialog.result() == QDialog.Rejected
+
+
+def test_export_dialog_browse_updates_path(qtbot, monkeypatch) -> None:
+    dialog = ExportDialog(
+        target_path="/tmp/output.csv",
+        default_only_visible=False,
+        has_visible_rows=True,
+    )
+    qtbot.addWidget(dialog)
+
+    def mock_get_save_filename(*args, **kwargs):
+        return ("/tmp/browsed.csv", "CSV Files (*.csv)")
+
+    monkeypatch.setattr(
+        "product_description_tool.dialogs.QFileDialog.getSaveFileName",
+        mock_get_save_filename,
+    )
+
+    dialog._browse_path()
+
+    assert dialog.path_edit.text() == "/tmp/browsed.csv"
