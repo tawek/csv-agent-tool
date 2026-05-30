@@ -23,7 +23,7 @@ class CsvConfig:
     export_path: str = ""
     export_only_visible: bool = False
     fields: dict[str, FieldConfig] = field(default_factory=dict)
-    delimiter: str = ","
+    delimiter: str = ";"
     quotechar: str = '"'
     encoding: str = "utf-8-sig"
     newline: str = ""

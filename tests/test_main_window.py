@@ -199,11 +199,11 @@ def _auto_discard_unsaved_changes(monkeypatch) -> None:
 
 def _write_csv(tmp_path: Path, row_count: int = 2) -> Path:
     csv_path = tmp_path / "products.csv"
-    rows = ['A-1,"<p>Alpha</p>","<p>Existing</p>"']
+    rows = ['A-1;"<p>Alpha</p>";"<p>Existing</p>"']
     for index in range(1, row_count):
-        rows.append(f'B-{index + 1},"<p>Beta {index}</p>",""')
+        rows.append(f'B-{index + 1};"<p>Beta {index}</p>";""')
     csv_path.write_text(
-        "sku,description,generated\n" + "\n".join(rows) + "\n",
+        "sku;description;generated\n" + "\n".join(rows) + "\n",
         encoding="utf-8",
     )
     return csv_path
