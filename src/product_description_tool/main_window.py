@@ -37,7 +37,7 @@ from product_description_tool.filter_proxy import WildcardFilterProxyModel
 from product_description_tool.generation import GenerationService
 from product_description_tool.preview import HtmlPreview, analyze_html_content, format_html_stats
 from product_description_tool.project import Project, ProjectPrompt, ProjectRepository
-from product_description_tool.prompt_renderer import PromptRenderer, PromptTemplateError
+from product_description_tool.prompt_renderer import CycleError, PromptRenderer, PromptTemplateError
 from product_description_tool.table_model import CsvTableModel
 from product_description_tool.worker import GenerationWorker
 
@@ -618,6 +618,7 @@ class MainWindow(QMainWindow):
             return
         if not self._validate_ready_for_generation(prompts):
             return
+        prompts = PromptRenderer.compute_prompt_order(prompts)
         if not row_specs:
             QMessageBox.warning(
                 self,
@@ -660,6 +661,20 @@ class MainWindow(QMainWindow):
                     ),
                 )
                 return False
+        # Check for cyclic dependencies among prompts
+        try:
+            PromptRenderer.compute_prompt_order(prompts)
+        except CycleError as exc:
+            edge_lines = []
+            for src, dst in exc.cycle_edges:
+                edge_lines.append(f"  {src} -> {dst}")
+            detail = "\n".join(edge_lines) if edge_lines else "No dependency edges detected."
+            QMessageBox.critical(
+                self,
+                "Cyclic dependency detected",
+                f"{exc}\n\nDependencies:\n{detail}",
+            )
+            return False
         return True
 
     def _start_worker(

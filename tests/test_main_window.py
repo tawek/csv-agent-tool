@@ -697,3 +697,31 @@ def test_collapsible_panels_use_palette_roles_in_stylesheet(qtbot, tmp_path: Pat
     assert "palette(mid)" in stylesheet
     assert "#2d2d2d" not in stylesheet
     assert "#242424" not in stylesheet
+
+
+def test_process_all_aborts_on_cyclic_prompt_dependencies(qtbot, tmp_path: Path, monkeypatch) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    window.generation_service = FakeGenerationService()
+    csv_path = _write_csv(tmp_path)
+    _import_window_csv(window, monkeypatch, csv_path)
+    _add_prompt(window, output_field="a", prompt="Use {{b}}")
+    _add_prompt(window, output_field="b", prompt="Use {{a}}")
+
+    critical_messages = []
+    original_critical = QMessageBox.critical
+
+    @staticmethod
+    def fake_critical(parent, title, text, *args, **kwargs):
+        critical_messages.append((title, text))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+
+    window.process_all_rows()
+
+    assert len(critical_messages) == 1
+    title, text = critical_messages[0]
+    assert "Cyclic" in text
+    assert window._activity_dialog is None
