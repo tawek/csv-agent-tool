@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QToolButton, QVBoxLayout, QWidget
 
 
 class _HeaderRow(QWidget):
@@ -80,6 +81,25 @@ class CollapsiblePanel(QWidget):
         self.title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         header_layout.addWidget(self.title_label)
         header_layout.addStretch(1)
+
+        self.maximize_button = QToolButton()
+        self.maximize_button.setObjectName("panelMaximize")
+        self.maximize_button.setToolTip("Maximize")
+        self.maximize_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.maximize_button.setFixedSize(20, 20)
+        self.maximize_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.maximize_button.setStyleSheet(
+            """
+            QToolButton#panelMaximize {
+                border: none;
+                padding: 2px;
+            }
+            QToolButton#panelMaximize:hover {
+                background-color: palette(midlight);
+            }
+            """
+        )
+        header_layout.addWidget(self.maximize_button)
         layout.addWidget(self.header_row)
 
         self.body_frame = QFrame()
@@ -103,6 +123,12 @@ class CollapsiblePanel(QWidget):
     def header_height(self) -> int:
         margins = self.layout().contentsMargins()
         return self.header_row.sizeHint().height() + margins.top() + margins.bottom()
+
+    def set_maximize_icon(self, icon: QIcon) -> None:
+        self.maximize_button.setIcon(icon)
+
+    def set_maximize_tooltip(self, tooltip: str) -> None:
+        self.maximize_button.setToolTip(tooltip)
 
     def _toggle_from_header(self) -> None:
         self.set_expanded(not self._expanded)
