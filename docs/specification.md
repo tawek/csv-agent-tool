@@ -446,6 +446,34 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Postconditions:** The application process terminates. Configuration is saved.
 
+## Use Case 23: Strip Whitespace from HTML Columns on Export
+
+**Actor:** User
+
+**Description:** The user enables per-column whitespace normalization so that consecutive spaces and line breaks in HTML column values are collapsed to a single space during CSV export.
+
+**Trigger:** User enables the "Strip whitespace on export" checkbox in the fields table within Settings, or the application strips whitespace when `strip_html_whitespace` is `True` for a column.
+
+**Preconditions:** A `CsvDocument` with headers and rows is loaded. The field for the HTML column has `strip_html_whitespace=True` in its `FieldConfig`.
+
+**Flow:**
+
+1. The user opens **File > Settings** and navigates to the **CSV** tab.
+2. The fields table displays four columns: **Header**, **Visible**, **Label**, and **Strip whitespace on export** (checkbox).
+3. The user checks or unchecks the "Strip whitespace on export" checkbox for any column.
+4. When the CSV is saved (via **Save**, **Save As**, or **Export**), the application iterates over each row.
+5. For every column whose `FieldConfig.strip_html_whitespace` is `True`, the cell value is normalized: consecutive whitespace characters (spaces, tabs, newlines, carriage returns) are replaced with a single space, and leading/trailing whitespace is trimmed.
+6. The normalized rows are written to the CSV file by `CsvRepository.save()`.
+
+**Postconditions:** The exported CSV contains whitespace-normalized HTML for columns with the strip flag enabled, while the in-memory `CsvDocument` retains its original values.
+
+**Error conditions:** No error conditions — if a cell is empty or contains no whitespace, normalization is a no-op.
+
+**Invariants:**
+- Whitespace stripping affects export/save only; the in-memory document is not modified.
+- The checkbox is per-column and persists in the project file via `FieldConfig`.
+- Normalization uses `re.sub(r'\s+', ' ', value).strip()` — all Unicode whitespace sequences collapse to a single space.
+
 ## Architecture Summary
 
 ### Components
@@ -482,6 +510,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 - The default CSV delimiter is `;` (semicolon). New projects and fresh installs use this delimiter unless the user changes it in Settings.
 - Generation parameters (temperature, top_p, max_output_tokens) apply to all providers and are shared across prompts in a single run.
 - The dirty flag (`_project_modified`) tracks unsaved changes and triggers save prompts on project switches.
+- Each field in `FieldConfig` may have `strip_html_whitespace=True`, which normalizes consecutive whitespace in the cell value to a single space during CSV export.
 
 ### Data Flow
 
@@ -502,5 +531,5 @@ User previews / processes
 
 User saves project
   → ProjectRepository.save() → *.project.json + *.prompt.txt sidecars
-  → CsvRepository.save() → *.csv sibling
+  → CsvRepository.save() → per-field whitespace normalization (if `strip_html_whitespace`), then writes *.csv sibling
 ```
