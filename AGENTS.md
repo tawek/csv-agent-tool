@@ -89,19 +89,32 @@ When adding a feature or fixing a bug:
    - For behavior modifications: update the affected Use Case(s) and any impacted invariants or data flow descriptions.
 3. **Ask for spec approval.** Present the spec changes to the user. Clearly describe what the spec change says and why. Do not write any code. Do not proceed until the user explicitly approves.
 
-### Phase 2: Implementation (After Spec Approval)
+### Phase 2: Planning (Before Any Code)
 
-Once the spec change is reviewed and approved:
+**This step is mandatory. Never skip planning.** A good plan must contain all of the following:
 
-4. **Plan the implementation.** Trace the relevant Use Case(s) and identify which modules, classes, and methods will be affected. Reference specific lines in the spec (Use Case number, flow step) to show how each part of the implementation satisfies a requirement.
-5. **Implement the code.** Make the minimum changes needed to satisfy the spec. Follow existing patterns and conventions.
-6. **Write or update tests.** Cover the new or modified behavior, especially in `tests/test_main_window.py` for UI flows.
-7. **Run validation.** Execute the test suite:
+1. **Spec traceability.** List every Use Case section and flow step that this implementation must satisfy. Reference specific line numbers or descriptions in the spec.
+2. **Affected modules.** Enumerate every file that will be read or written, with a one-line reason for each change.
+3. **New classes or methods.** Describe each new function, method, or class — its name, signature, purpose, and which flow step it fulfills.
+4. **Existing code modifications.** List every existing method that will be changed, what the change is, and why.
+5. **Test plan.** Identify which tests need to be written or updated, referencing the behavior they will cover.
+6. **Backward compatibility.** Note any data format changes (e.g., new config keys, new project JSON fields) and whether existing files will still load correctly.
+7. **Dependencies and ordering.** Specify which changes must happen before others (e.g., data models before UI, imports before usage).
+
+Present the plan to the user as a structured list or todo-style output. Do not write any code during planning. Wait for approval before implementing.
+
+### Phase 3: Implementation (After Plan Approval)
+
+Once the plan is reviewed and approved:
+
+4. **Implement the code in the order specified by the plan.** Make the minimum changes needed to satisfy the spec. Follow existing patterns and conventions.
+5. **Write or update tests.** Cover the new or modified behavior, especially in `tests/test_main_window.py` for UI flows.
+6. **Run validation.** Execute the test suite:
    ```bash
    QT_QPA_PLATFORM=offscreen PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1 uv run pytest
    ```
    For packaging changes, also run PyInstaller.
-8. **Submit the implementation for review.** Show the code changes, tests, and test results. Reference the Use Case numbers and flow steps the implementation satisfies.
+7. **Submit the implementation for review.** Show the code changes, tests, and test results. Reference the Use Case numbers and flow steps the implementation satisfies.
 
 ### Commit Discipline
 
