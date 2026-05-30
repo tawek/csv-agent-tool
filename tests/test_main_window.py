@@ -228,7 +228,7 @@ def _add_prompt(window: MainWindow, *, output_field: str, prompt: str, enabled: 
     window._sync_project_with_document()
     window._refresh_prompt_controls(preserve_field=output_field)
     window._refresh_table_from_document()
-    window._update_preview_field_selectors(preserve_selection=True)
+    window._update_preview_field_selectors(preserve_selection=False)
 
 
 def test_loading_and_selecting_row_updates_previews(qtbot, tmp_path: Path, monkeypatch) -> None:
@@ -238,16 +238,18 @@ def test_loading_and_selecting_row_updates_previews(qtbot, tmp_path: Path, monke
 
     csv_path = _write_csv(tmp_path)
     _import_window_csv(window, monkeypatch, csv_path)
+    _add_prompt(window, output_field="generated", prompt="Rewrite {{description}}")
 
-    assert window.right_field_combo.currentText() == "sku"
+    assert window.left_field_combo.currentText() == "description"
+    assert window.right_field_combo.currentText() == "generated"
 
     window.table_view.selectRow(1)
     qtbot.waitUntil(lambda: window.last_original_preview_html == "<p>Beta 1</p>")
     qtbot.waitUntil(lambda: window.table_view.viewport().width() > 0)
 
-    assert window.last_result_preview_html == "B-2"
+    assert window.last_result_preview_html == ""
     assert window.original_stats_label.text() == "Sections: 0, Paragraphs: 1, Words: 2, Characters: 5"
-    assert window.result_stats_label.text() == "Sections: 0, Paragraphs: 0, Words: 1, Characters: 3"
+    assert window.result_stats_label.text() == "Sections: 0, Paragraphs: 0, Words: 0, Characters: 0"
     assert "Files" not in [group.title() for group in window.findChildren(QGroupBox)]
     total_width = sum(window.table_view.columnWidth(index) for index in range(window.proxy_model.columnCount()))
     assert total_width <= window.table_view.viewport().width() + 4
@@ -285,6 +287,7 @@ def test_edit_selected_description_updates_model(qtbot, tmp_path: Path, monkeypa
     window.show()
     csv_path = _write_csv(tmp_path)
     _import_window_csv(window, monkeypatch, csv_path)
+    _add_prompt(window, output_field="generated", prompt="Rewrite {{description}}")
 
     window.edit_selected_description("description")
 

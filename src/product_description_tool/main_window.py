@@ -37,7 +37,7 @@ from product_description_tool.filter_proxy import WildcardFilterProxyModel
 from product_description_tool.generation import GenerationService
 from product_description_tool.preview import HtmlPreview, analyze_html_content, format_html_stats
 from product_description_tool.project import Project, ProjectPrompt, ProjectRepository
-from product_description_tool.prompt_renderer import PromptTemplateError
+from product_description_tool.prompt_renderer import PromptRenderer, PromptTemplateError
 from product_description_tool.table_model import CsvTableModel
 from product_description_tool.worker import GenerationWorker
 
@@ -53,6 +53,7 @@ class MainWindow(QMainWindow):
         self.csv_repository = CsvRepository()
         self.project_repository = ProjectRepository()
         self.generation_service = GenerationService()
+        self.prompt_renderer = PromptRenderer()
 
         self.project = Project(csv=CsvConfig.from_dict(self.config.csv.to_dict()))
         self.document = CsvDocument(headers=[], rows=[])
@@ -644,14 +645,6 @@ class MainWindow(QMainWindow):
         if not self.document.rows:
             QMessageBox.warning(self, "No data", "Import or open a project CSV first.")
             return False
-        original_column = self.project.csv.original_description
-        if original_column not in self.document.headers:
-            QMessageBox.warning(
-                self,
-                "Missing column",
-                f"Original description column '{original_column}' was not found in the CSV.",
-            )
-            return False
         for prompt in prompts:
             try:
                 self.generation_service.validate_template(prompt.prompt, self.document.headers)
@@ -1075,10 +1068,21 @@ class MainWindow(QMainWindow):
         self._refresh_current_selection()
 
     def _preferred_left_field(self, current_field: str, headers: list[str]) -> str:
-        for candidate in [current_field, self.project.csv.original_description]:
-            if candidate and candidate in headers:
-                return candidate
-        return headers[0] if headers else ""
+        if current_field and current_field in headers:
+            return current_field
+        for prompt in self.project.prompts:
+            if not prompt.prompt:
+                continue
+            referenced = self.prompt_renderer.extract_placeholders(prompt.prompt)
+            if not referenced:
+                continue
+            if len(referenced) == 1 and referenced[0] in headers:
+                return referenced[0]
+            valid = [col for col in referenced if col in headers]
+            if valid:
+                best = max(valid, key=lambda col: sum(len(row.get(col, "")) for row in self.document.rows))
+                return best
+        return ""
 
     def _preferred_right_field(
         self,

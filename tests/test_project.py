@@ -25,8 +25,6 @@ def test_project_repository_round_trips_prompts_and_csv_config(tmp_path: Path) -
             ProjectPrompt(output_field="seo", prompt="SEO {{sku}}", enabled=False),
         ]
     )
-    project.csv.original_description = "description"
-    project.csv.result_description = "summary"
     project.csv.delimiter = ";"
 
     saved_path = repository.save(tmp_path / "catalog.project.json", project)
@@ -36,6 +34,5 @@ def test_project_repository_round_trips_prompts_and_csv_config(tmp_path: Path) -
     assert loaded.prompts[0].prompt == "Summarize {{sku}}"
     assert loaded.prompts[0].prompt_file == "summary.prompt.txt"
     assert loaded.prompts[1].enabled is False
-    assert loaded.csv.result_description == "summary"
     assert loaded.csv.delimiter == ";"
     assert (tmp_path / "summary.prompt.txt").read_text(encoding="utf-8") == "Summarize {{sku}}"

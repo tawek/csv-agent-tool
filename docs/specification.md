@@ -25,7 +25,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
    - **OpenAI-compatible:** Base URL, API key, model name, and arbitrary options JSON.
 4. The user can refresh the model list from the active provider endpoint via a refresh button.
 5. The user sets generation parameters: temperature (0.0-2.0), top-p (0.0-1.0), max output tokens (1-200000).
-6. The user configures CSV I/O: original description column name, delimiter, quote char, encoding, newline character, whether to write headers, and the default state of the "export only visible rows" checkbox (a boolean option).
+6. The user configures CSV I/O: delimiter, quote char, encoding, newline character, whether to write headers, and the default state of the "export only visible rows" checkbox (a boolean option).
 7. The user manages per-column visibility and display labels through an editable table of fields. They may reset the fields table to match the currently loaded CSV headers.
 8. The user confirms or cancels. On confirm, the provider config and generation config are saved to the persistent `ConfigStore` (JSON on disk). The project-scoped `CsvConfig` is applied to the working document and table model.
 
@@ -254,7 +254,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Flow:**
 
-1. Validation runs: the document has rows, the original description column exists, and the prompt template references only known headers.
+1. Validation runs: the document has rows, and the prompt template references only known headers.
 2. A `GenerationWorker` is created on a `QThread` with the selected row and the single prompt.
 3. An `ActivityDialog` opens showing the provider, model, generation parameters, input/output character counts, and a progress indicator.
 4. The worker streams chunks from the provider back to the UI via signals. Each chunk is appended to the cell in the table model.
@@ -391,7 +391,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Actor:** User
 
-**Description:** The user views side-by-side HTML previews of the original description and the generated result for the currently selected row.
+**Description:** The user views side-by-side HTML previews of any source field and the generated result for the currently selected row.
 
 **Trigger:** Automatic on row selection change or generation chunk arrival.
 
@@ -399,10 +399,14 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Flow:**
 
-1. The user selects fields in the left (original) and right (result) combo boxes.
-2. The description panel renders the HTML of each field using `HtmlPreview`, which falls back to `QTextBrowser` when Qt WebEngine is disabled.
-3. Stats below each preview show section count, paragraph count, word count, and character count.
-4. When a generation is in progress, the right preview updates live as chunks stream in.
+1. When the left preview field selector is auto-populated (e.g., on row selection or prompt change), the application determines which column to select as the "source" field:
+   - If the prompt template references exactly one CSV column, that column is selected.
+   - If the prompt template references multiple CSV columns, the application measures the content length (character count) of each referenced column across all rows in the document, selects the column with the highest total content length, and uses that as the default.
+   - If no columns are referenced, the selector defaults to empty and the left preview pane shows nothing.
+2. The user selects fields in the left (source) and right (result) combo boxes.
+3. The description panel renders the HTML of each field using `HtmlPreview`, which falls back to `QTextBrowser` when Qt WebEngine is disabled.
+4. Stats below each preview show section count, paragraph count, word count, and character count.
+5. When a generation is in progress, the right preview updates live as chunks stream in.
 
 **Postconditions:** The user sees a rendered comparison of source and generated HTML descriptions.
 
@@ -474,7 +478,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 - Prompt output columns must exist in the `CsvDocument` at all times. Adding a prompt materializes the column.
 - The sibling CSV file (`*.csv`) and the `.project.json` form a single project unit. They are saved and loaded together.
 - Filtering affects the table view display and the scope of "Process Visible Rows". It does not modify or remove data.
-- The `original_description` column in `CsvConfig` defines which CSV column feeds into prompt templates as source data.
+- Prompt templates can reference any CSV column by name via `{{column_name}}` placeholders.
 - Generation parameters (temperature, top_p, max_output_tokens) apply to all providers and are shared across prompts in a single run.
 - The dirty flag (`_project_modified`) tracks unsaved changes and triggers save prompts on project switches.
 

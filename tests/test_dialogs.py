@@ -144,7 +144,8 @@ def test_settings_dialog_expands_primary_controls(qtbot) -> None:
     assert dialog.openai_api_key_edit.minimumWidth() >= 420
     assert dialog.ollama_model_combo.parentWidget().minimumWidth() >= 420
     assert dialog.ollama_options_edit.minimumWidth() >= 420
-    assert dialog.original_description_edit.minimumWidth() >= 320
+    assert dialog.delimiter_edit.minimumWidth() >= 120
+    assert dialog.export_only_visible_checkbox.isChecked() == dialog._config.csv.export_only_visible
 
 
 def test_settings_dialog_refreshes_ollama_model_choices(qtbot, monkeypatch) -> None:

@@ -586,20 +586,17 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         self._configure_form_layout(form)
-        self.original_description_edit = QLineEdit(self._config.csv.original_description)
         self.delimiter_edit = QLineEdit(self._config.csv.delimiter)
         self.quotechar_edit = QLineEdit(self._config.csv.quotechar)
         self.encoding_edit = QLineEdit(self._config.csv.encoding)
         self.newline_edit = QLineEdit(self._config.csv.newline)
         self.write_header_checkbox = QCheckBox()
         self.write_header_checkbox.setChecked(self._config.csv.write_header)
-        self._expand_control(self.original_description_edit)
         self._expand_control(self.delimiter_edit, minimum_width=120)
         self._expand_control(self.quotechar_edit, minimum_width=120)
         self._expand_control(self.encoding_edit)
         self._expand_control(self.newline_edit)
 
-        form.addRow("Original description column", self.original_description_edit)
         form.addRow("Delimiter", self.delimiter_edit)
         form.addRow("Quote char", self.quotechar_edit)
         form.addRow("Encoding", self.encoding_edit)
@@ -744,7 +741,6 @@ class SettingsDialog(QDialog):
                     "max_output_tokens": self.max_tokens_spin.value(),
                 },
                 "csv": {
-                    "original-description": self.original_description_edit.text().strip(),
                     "fields": {key: asdict(value) for key, value in csv_fields.items()},
                     "delimiter": self._single_char_value(
                         self.delimiter_edit.text(),

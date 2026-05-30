@@ -25,7 +25,6 @@ def test_save_preserves_existing_headers_and_honors_delimiter(tmp_path: Path) ->
         dialect=CsvDialectSettings(delimiter=",", quotechar='"'),
     )
     config = CsvConfig(
-        original_description="description",
         delimiter=";",
         encoding="utf-8",
     )
