@@ -74,20 +74,30 @@ When a feature needs deeper explanation than a short README note, add or extend 
 
 All changes follow a strict two-phase workflow with explicit review gates. **Never skip the spec update step or combine spec and implementation into a single commit.**
 
-### Mandatory Approval Gate
+### Approval Gates
 
-**Before any code changes, you must present the spec update to the user and ask for explicit approval.** Do not proceed to implementation until the user clearly confirms the spec is correct. Never assume approval — always ask and wait for a direct affirmative.
+At each phase boundary, you must stop and ask the user for explicit approval before proceeding. Never assume consent — always ask.
+
+- After Phase 1: ask **"Does this spec change look correct? Shall I proceed to planning?"**
+- After Phase 2: ask **"Does this plan look correct? Shall I proceed to implementation?"**
+- After Phase 3: ask **"Does the implementation look correct? Shall I commit?"**
 
 ### Phase 1: Spec Change (Write First)
 
-When adding a feature or fixing a bug:
+**Entry criteria:** A new feature request, bug report, or behavior modification has been identified. No code has been written yet.
+
+**Flow:**
 
 1. **Understand the change.** Determine whether this is a new feature, a modification to existing behavior, or a bug fix.
 2. **Update `docs/specification.md`.**
    - For new features: add a new Use Case section (numbered sequentially) describing the actor, trigger, preconditions, flow, postconditions, invariants, and error conditions.
    - For bug fixes: update the relevant Use Case to describe the *correct* expected behavior (not the buggy current behavior). Add an "Error conditions" section if one is missing.
    - For behavior modifications: update the affected Use Case(s) and any impacted invariants or data flow descriptions.
-3. **Ask for spec approval.** Present the spec changes to the user. Clearly describe what the spec change says and why. Do not write any code. Do not proceed until the user explicitly approves.
+3. **Commit the spec.** Stage `docs/specification.md` and create a commit. Message should reference the Use Case number(s) being added or modified.
+4. **Present the spec changes.** Clearly describe what the spec change says and why. Do not write any code.
+5. **Ask the user for approval.** Present the spec to the user and ask: **"Does this spec change look correct? Shall I proceed to planning?"**
+
+**Exit criteria:** The user has explicitly approved the spec change. The spec commit exists. No implementation code has been written.
 
 ### Phase 2: Planning (Before Any Code)
 
@@ -101,20 +111,31 @@ When adding a feature or fixing a bug:
 6. **Backward compatibility.** Note any data format changes (e.g., new config keys, new project JSON fields) and whether existing files will still load correctly.
 7. **Dependencies and ordering.** Specify which changes must happen before others (e.g., data models before UI, imports before usage).
 
-Present the plan to the user as a structured list or todo-style output. Do not write any code during planning. Wait for approval before implementing.
+**Flow:**
+
+1. Present the plan to the user as a structured list or todo-style output.
+2. Do not write any code during planning.
+3. **Ask the user for approval.** Present the plan to the user and ask: **"Does this plan look correct? Shall I proceed to implementation?"**
+
+**Exit criteria:** The user has explicitly approved the plan. No code has been written yet.
 
 ### Phase 3: Implementation (After Plan Approval)
 
-Once the plan is reviewed and approved:
+**Entry criteria:** The implementation plan has been reviewed and explicitly approved by the user.
+
+**Flow:**
 
 4. **Implement the code in the order specified by the plan.** Make the minimum changes needed to satisfy the spec. Follow existing patterns and conventions.
 5. **Write or update tests.** Cover the new or modified behavior, especially in `tests/test_main_window.py` for UI flows.
 6. **Run validation.** Execute the test suite:
-   ```bash
-   QT_QPA_PLATFORM=offscreen PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1 uv run pytest
-   ```
-   For packaging changes, also run PyInstaller.
+    ```bash
+    QT_QPA_PLATFORM=offscreen PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1 uv run pytest
+    ```
+    For packaging changes, also run PyInstaller.
 7. **Submit the implementation for review.** Show the code changes, tests, and test results. Reference the Use Case numbers and flow steps the implementation satisfies.
+8. **Ask the user for approval.** Present the implementation to the user and ask: **"Does the implementation look correct? Shall I commit?"**
+
+**Exit criteria:** The user has explicitly approved the implementation. The implementation commit is ready.
 
 ### Commit Discipline
 
@@ -128,9 +149,10 @@ For bug fixes, the workflow is:
 
 1. Update the spec to describe the *correct* behavior (not the buggy behavior).
 2. Review and commit the spec update.
-3. Implement the fix to match the updated spec.
-4. Add regression tests if appropriate.
-5. Review and commit the implementation.
+3. Present the implementation plan and **ask for user approval** before writing any code.
+4. Implement the fix to match the approved plan.
+5. Add regression tests if appropriate.
+6. Review and commit the implementation.
 
 This ensures the spec always reflects the desired behavior, not whatever is currently broken.
 
