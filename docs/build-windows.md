@@ -51,7 +51,18 @@ ssh gfl@192.168.1.13 'cd /home/gfl && git clone git@github.com:tawek/csv-agent-t
 
 ## Standard Build (Steps 4–7)
 
-**Step 4 — Sync Fresh Source via Archive**
+**Step 4 — Check for Running Build**
+
+Before starting, ensure no previous build is still running. The build uses a file-based lock (`/home/gfl/.build.lock`) that `mkdir` creates atomically:
+
+```bash
+ssh gfl@192.168.1.13 \
+  'if ! mkdir /home/gfl/.build.lock 2>/dev/null; then echo "Build already running, waiting..."; while ! mkdir /home/gfl/.build.lock 2>/dev/null; do sleep 5; done; fi'
+```
+
+This blocks until the previous build releases the lock (removes the directory).
+
+**Step 5 — Sync Fresh Source via Archive**
 
 Always push the latest local source to the remote to avoid stale builds. Use `git archive` piped over SSH — this pushes only the current HEAD without requiring git on the remote:
 
@@ -59,7 +70,16 @@ Always push the latest local source to the remote to avoid stale builds. Use `gi
 git archive --format=tar HEAD | ssh gfl@192.168.1.13 'tar -xC /home/gfl/csv-agent-tool --strip-components=0'
 ```
 
-**Step 5 — Build with PyInstaller**
+**Step 6 — Build with PyInstaller**
+
+Run the build; it will release the lock when finished (success or failure):
+
+```bash
+ssh gfl@192.168.1.13 \
+  'cmd.exe /c "set PYTHONPATH=C:\cygwin64\home\gfl\csv-agent-tool\src && cd /d C:\cygwin64\home\gfl\csv-agent-tool && C:\Users\gfl\build-env\Scripts\python.exe -m PyInstaller --clean --noconfirm packaging\product_description_tool.spec" && rmdir /home/gfl/.build.lock'
+```
+
+Use `&&` to ensure the lock is only removed on success. If the build fails, the lock persists and you can manually remove it with `ssh gfl@192.168.1.13 'rmdir /home/gfl/.build.lock'`.
 
 ```bash
 ssh gfl@192.168.1.13 \
@@ -74,7 +94,7 @@ ssh gfl@192.168.1.13 \
 
 Build takes ~2 minutes.
 
-**Step 6 — Add install.bat**
+**Step 7 — Add install.bat**
 
 Copy the installation script into the dist directory:
 
@@ -86,7 +106,7 @@ The `install.bat` script copies the application from wherever it was downloaded 
 
 ---
 
-**Step 7 — Retrieve the Build (Tar Stream)**
+**Step 8 — Retrieve the Build (Tar Stream)**
 
 Do **not** use `scp` — it is extremely slow for 500+ MB of small files. Use tar streaming instead:
 
@@ -96,11 +116,11 @@ ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-des
 
 The output includes:
 - `product-description-tool.exe` (~7 MB, the entry point)
-- `_internal/` (~559 MB, all Qt DLLs, Python extensions, bundled packages)
+- `_internal/` (~150-170 MB, all Qt DLLs, Python extensions, bundled packages)
 
 **You must ship the entire directory.** The exe won't run without the `_internal` folder.
 
-**Step 7 — Upload to Google Drive**
+**Step 11 — Upload to Google Drive**
 
 Check rclone token expiry first. If expired, re-authenticate:
 
@@ -119,7 +139,7 @@ Verify completion:
 
 ```bash
 rclone size GoogleDrive:WFirma/product-description-tool/
-# Should report ~2965 objects, ~566 MiB
+# Should report ~800-1000 objects, ~170-200 MiB
 ```
 
 ---
@@ -127,24 +147,31 @@ rclone size GoogleDrive:WFirma/product-description-tool/
 ## Full One-Liner (Complete Build)
 
 ```bash
-# 1. Sync fresh source
-git archive --format=tar HEAD | ssh gfl@192.168.1.13 'tar -xC /home/gfl/csv-agent-tool'
-
-# 2. Build
+# 1. Check for running build and wait
 ssh gfl@192.168.1.13 \
-  'cmd.exe /c "set PYTHONPATH=C:\cygwin64\home\gfl\csv-agent-tool\src && cd /d C:\cygwin64\home\gfl\csv-agent-tool && C:\Users\gfl\build-env\Scripts\python.exe -m PyInstaller --clean --noconfirm packaging\product_description_tool.spec"'
+  'if ! mkdir /home/gfl/.build.lock 2>/dev/null; then echo "Build already running, waiting..."; while ! mkdir /home/gfl/.build.lock 2>/dev/null; do sleep 5; done; fi'
 
-# 3. Add install.bat to dist
+# 2. Sync fresh source
+git archive --format=tar HEAD | ssh gfl@192.168.1.13 'tar -xC /home/gfl/csv-agent-tool --strip-components=0'
+
+# 3. Build (lock is removed on success)
+ssh gfl@192.168.1.13 \
+  'cmd.exe /c "set PYTHONPATH=C:\cygwin64\home\gfl\csv-agent-tool\src && cd /d C:\cygwin64\home\gfl\csv-agent-tool && C:\Users\gfl\build-env\Scripts\python.exe -m PyInstaller --clean --noconfirm packaging\product_description_tool.spec" && rmdir /home/gfl/.build.lock'
+
+# 4. Add install.bat to dist
 scp packaging/install.bat gfl@192.168.1.13:/home/gfl/csv-agent-tool/dist/product-description-tool/
 
-# 4. Retrieve via tar stream
+# 5. Retrieve via tar stream
 ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-description-tool' | tar -C /tmp -xzf -
 
-# 5. Check token and upload
+# 6. Check token and upload
 rclone ls GoogleDrive:WFirma/product-description-tool/ > /dev/null 2>&1 || \
   rclone authorize "drive" "<client_id> <client_secret>"
 rclone copy /tmp/product-description-tool/ GoogleDrive:WFirma/product-description-tool/ \
   --transfers=4 --checkers=8
+
+# 7. Verify size (should be ~170-200 MB, not 500+ MB)
+ls -lh /tmp/product-description-tool/
 ```
 
 ---
