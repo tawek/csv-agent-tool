@@ -70,91 +70,110 @@ When a feature needs deeper explanation than a short README note, add or extend 
 - Provider changes should preserve streaming and cancellation behavior for both Ollama and OpenAI-compatible endpoints.
 - When changing prompt rendering or CSV field handling, verify both persistence and UI-selection flows because `MainWindow` ties them together tightly.
 
-## Workflow: Spec-First, Two-Phase Commits
+## Workflow: Spec-First, No Commits or Pushes Without Approval
 
-All changes follow a strict two-phase workflow with explicit review gates. **Never skip the spec update step or combine spec and implementation into a single commit.**
+### Golden Rule
 
-**Every user statement must be treated as a potential change to the spec.** Before implementing any request, the agent must first update `docs/specification.md` to reflect the correct expected behavior, commit the spec change, and present it to the user for approval. This includes layout adjustments, button positions, tooltip text, icon behavior, and any other UI or behavioral detail.
+**NEVER commit code or push to remote without explicit user approval.** This is the single most important rule. Violating this is a critical failure.
+
+### Explicit Approval Definition
+
+**Explicit approval** means the user says one of:
+- "yes"
+- "approved"
+- "looks good"
+- "go ahead"
+- "commit" (only when asked about committing)
+- "push" (only when asked about pushing)
+
+**These do NOT count as approval:**
+- "run" — this means execute the tool
+- "go" — this means proceed with execution
+- "continue" — this means continue the current operation
+- "fix it" — this means fix the problem, not approve changes
+- "try" / "test" / "show" — any command that could mean "execute"
+- Silence or ambiguity — if unsure, ask
+
+When in doubt, **always ask**.
 
 ### Approval Gates
 
-At each phase boundary, you must stop and ask the user for explicit approval before proceeding. Never assume consent — always ask.
+You must stop and ask for approval at each phase boundary. **Never proceed without explicit approval.**
 
-- After Phase 1: ask **"Does this spec change look correct? Shall I proceed to planning?"**
-- After Phase 2: ask **"Does this plan look correct? Shall I proceed to implementation?"**
-- After Phase 3: ask **"Does the implementation look correct? Shall I commit?"**
+1. **After spec update:** Ask **"Does this spec change look correct? Shall I proceed to implementation?"**
+2. **After implementation:** Ask **"Does the implementation look correct? Shall I commit?"**
+3. **After commit:** Ask **"Shall I push?"** — only push when the user explicitly says "yes" to pushing.
 
-### Phase 1: Spec Change (Write First)
+### Workflow Steps
 
-**Entry criteria:** A new feature request, bug report, or behavior modification has been identified. No code has been written yet.
+#### Step 1: Update the Spec
 
-**Flow:**
+**Entry criteria:** A feature request, bug report, or behavior change has been identified. No code has been written yet.
 
 1. **Understand the change.** Determine whether this is a new feature, a modification to existing behavior, or a bug fix.
-2. **Update `docs/specification.md`.**
-   - For new features: add a new Use Case section (numbered sequentially) describing the actor, trigger, preconditions, flow, postconditions, invariants, and error conditions.
-   - For bug fixes: update the relevant Use Case to describe the *correct* expected behavior (not the buggy current behavior). Add an "Error conditions" section if one is missing.
-   - For behavior modifications: update the affected Use Case(s) and any impacted invariants or data flow descriptions.
-3. **Commit the spec.** Stage `docs/specification.md` and create a commit. Message should reference the Use Case number(s) being added or modified.
-4. **Present the spec changes.** Clearly describe what the spec change says and why. Do not write any code.
-5. **Ask the user for approval.** Present the spec to the user and ask: **"Does this spec change look correct? Shall I proceed to planning?"**
+2. **Update `docs/specification.md`** to describe the correct expected behavior:
+   - For new features: add a Use Case section describing the actor, trigger, flow, and invariants.
+   - For bug fixes: update the relevant Use Case to describe the *correct* behavior.
+   - For behavior modifications: update the affected Use Case(s).
+3. **Present the spec changes** to the user. Do not write any code. Do not commit anything.
+4. **Ask for approval.** Present the spec and ask: **"Does this spec change look correct? Shall I proceed to implementation?"**
+5. **Wait for explicit approval.** Do not proceed until the user says "yes", "approved", "looks good", or similar.
 
-**Exit criteria:** The user has explicitly approved the spec change. The spec commit exists. No implementation code has been written.
+#### Step 2: Implement (After Spec Approval)
 
-### Phase 2: Planning (Before Any Code)
+**Entry criteria:** The user has explicitly approved the spec change.
 
-**This step is mandatory. Never skip planning.** A good plan must contain all of the following:
-
-1. **Spec traceability.** List every Use Case section and flow step that this implementation must satisfy. Reference specific line numbers or descriptions in the spec.
-2. **Affected modules.** Enumerate every file that will be read or written, with a one-line reason for each change.
-3. **New classes or methods.** Describe each new function, method, or class — its name, signature, purpose, and which flow step it fulfills.
-4. **Existing code modifications.** List every existing method that will be changed, what the change is, and why.
-5. **Test plan.** Identify which tests need to be written or updated, referencing the behavior they will cover.
-6. **Backward compatibility.** Note any data format changes (e.g., new config keys, new project JSON fields) and whether existing files will still load correctly.
-7. **Dependencies and ordering.** Specify which changes must happen before others (e.g., data models before UI, imports before usage).
-
-**Flow:**
-
-1. Present the plan to the user as a structured list or todo-style output.
-2. Do not write any code during planning.
-3. **Ask the user for approval.** Present the plan to the user and ask: **"Does this plan look correct? Shall I proceed to implementation?"**
-
-**Exit criteria:** The user has explicitly approved the plan. No code has been written yet.
-
-### Phase 3: Implementation (After Plan Approval)
-
-**Entry criteria:** The implementation plan has been reviewed and explicitly approved by the user.
-
-**Flow:**
-
-4. **Implement the code in the order specified by the plan.** Make the minimum changes needed to satisfy the spec. Follow existing patterns and conventions.
-5. **Write or update tests.** Cover the new or modified behavior, especially in `tests/test_main_window.py` for UI flows.
-6. **Run validation.** Execute the test suite:
+1. **Make the minimum changes** needed to satisfy the spec. Follow existing patterns and conventions.
+2. **Write or update tests.** Cover the new or modified behavior, especially in `tests/test_main_window.py`.
+3. **Run validation:**
     ```bash
     QT_QPA_PLATFORM=offscreen PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1 uv run pytest
     ```
-    For packaging changes, also run PyInstaller.
-7. **Submit the implementation for review.** Show the code changes, tests, and test results. Reference the Use Case numbers and flow steps the implementation satisfies.
-8. **Ask the user for approval.** Present the implementation to the user and ask: **"Does the implementation look correct? Shall I commit?"**
+4. **Show the code changes** and test results to the user. Reference the Use Case numbers and spec sections the implementation satisfies.
+5. **Ask for commit approval.** Present the changes and ask: **"Does the implementation look correct? Shall I commit?"**
+6. **Wait for explicit approval.** Do not commit until the user says "yes", "commit", "approved", or similar.
 
-**Exit criteria:** The user has explicitly approved the implementation. The implementation commit is ready.
+#### Step 3: Commit (After Commit Approval)
 
-### Commit Discipline
+**Entry criteria:** The user has explicitly approved the commit.
 
-- **Commit 1:** Spec-only changes (`docs/specification.md`). Message should reference the Use Case number(s) being added or modified.
-- **Commit 2:** Implementation changes (code + tests). Message should reference the same Use Case number(s) and note that they follow the approved spec update.
-- **Never** put spec and implementation in the same commit unless explicitly instructed (e.g., for emergency hotfixes with no review path).
+1. Stage `docs/specification.md` and create the spec commit. Message should reference the Use Case number(s).
+2. Stage all code and test changes. Create the implementation commit. Message should reference the Use Case number(s) and note they follow the approved spec update.
+3. **Never combine spec and implementation in a single commit.**
+
+#### Step 4: Push (After Explicit Push Approval)
+
+**Entry criteria:** The user has explicitly approved the push.
+
+1. **Only push when the user explicitly says "push" or "yes" to a push question.**
+2. If the user has not been asked about pushing, ask: **"Shall I push?"**
+3. **Never push without this explicit approval.**
+
+### What Counts as a Spec Change
+
+Only the following require a spec update:
+- New features
+- Bug fixes (describing the correct behavior)
+- Behavior modifications
+
+**These do NOT require a spec update:**
+- Typos in documentation
+- Cosmetic changes already covered by existing specs
+- Changes to implementation details that don't affect external behavior
+- Adding or removing comments
+- Refactoring internal code structure
+
+If unsure whether something needs a spec change, **ask the user**.
 
 ### Bug Fix Variant
 
-For bug fixes, the workflow is:
-
-1. Update the spec to describe the *correct* behavior (not the buggy behavior).
-2. Review and commit the spec update.
-3. Present the implementation plan and **ask for user approval** before writing any code.
-4. Implement the fix to match the approved plan.
-5. Add regression tests if appropriate.
-6. Review and commit the implementation.
+For bug fixes:
+1. Update the spec to describe the *correct* behavior.
+2. Present the spec to the user and ask for approval.
+3. Implement the fix to match the approved spec.
+4. Add regression tests if appropriate.
+5. Show the implementation and ask for commit approval.
+6. Only commit and push after explicit approval.
 
 This ensures the spec always reflects the desired behavior, not whatever is currently broken.
 
