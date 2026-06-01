@@ -74,7 +74,19 @@ ssh gfl@192.168.1.13 \
 
 Build takes ~2 minutes.
 
-**Step 6 — Retrieve the Build (Tar Stream)**
+**Step 6 — Add install.bat**
+
+Copy the installation script into the dist directory:
+
+```bash
+cp packaging/install.bat /home/gfl/csv-agent-tool/dist/product-description-tool/
+```
+
+The `install.bat` script copies the application from wherever it was downloaded (e.g., Google Drive folder) to `C:\apps\product-description-tool\`.
+
+---
+
+**Step 7 — Retrieve the Build (Tar Stream)**
 
 Do **not** use `scp` — it is extremely slow for 500+ MB of small files. Use tar streaming instead:
 
@@ -122,10 +134,13 @@ git archive --format=tar HEAD | ssh gfl@192.168.1.13 'tar -xC /home/gfl/csv-agen
 ssh gfl@192.168.1.13 \
   'cmd.exe /c "set PYTHONPATH=C:\cygwin64\home\gfl\csv-agent-tool\src && cd /d C:\cygwin64\home\gfl\csv-agent-tool && C:\Users\gfl\build-env\Scripts\python.exe -m PyInstaller --clean --noconfirm packaging\product_description_tool.spec"'
 
-# 3. Retrieve via tar stream
+# 3. Add install.bat to dist
+scp packaging/install.bat gfl@192.168.1.13:/home/gfl/csv-agent-tool/dist/product-description-tool/
+
+# 4. Retrieve via tar stream
 ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-description-tool' | tar -C /tmp -xzf -
 
-# 4. Check token and upload
+# 5. Check token and upload
 rclone ls GoogleDrive:WFirma/product-description-tool/ > /dev/null 2>&1 || \
   rclone authorize "drive" "<client_id> <client_secret>"
 rclone copy /tmp/product-description-tool/ GoogleDrive:WFirma/product-description-tool/ \
