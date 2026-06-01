@@ -185,6 +185,15 @@ rclone authorize "drive" "<client_id> <client_secret>"
 
 **Never use `rclone config` interactively** — it corrupts the config file if interrupted. Always use `rclone authorize` which writes to the same token field non-interactively.
 
+### rclone uses content hashing, not mtime
+
+rclone determines whether to re-upload files by comparing content hashes, **not modification times**. Touching a file (changing only its mtime) does **not** trigger a re-upload — rclone only updates the destination's mtime to match the source.
+
+This means:
+- Re-running rclone after a build is safe; unchanged files are skipped entirely (0 bytes transferred if nothing changed).
+- The mtime sync is cosmetic — it doesn't affect which files get uploaded.
+- Use `--log-level=INFO --log-file=/tmp/rclone-upload.log` to verify what was actually transferred. The log will say "There was nothing to transfer" when all files are already up to date.
+
 ### `scp` is too slow for the build directory
 
 `scp -r` on a 500+ MB directory with thousands of small files can take 10+ minutes. Use the tar streaming method in Step 6 instead.
