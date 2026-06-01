@@ -51,11 +51,6 @@ class CollapsiblePanel(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(0)
 
-        self.title_label = QLabel(title)
-        self.title_label.setObjectName("panelTitle")
-        self.title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        header_layout.addWidget(self.title_label)
-
         self.minimize_button = QToolButton()
         self.minimize_button.setObjectName("panelMinimize")
         self.minimize_button.setToolTip("Minimize")
@@ -100,6 +95,11 @@ class CollapsiblePanel(QWidget):
             """
         )
         header_layout.addWidget(self.maximize_button)
+
+        self.title_label = QLabel(title)
+        self.title_label.setObjectName("panelTitle")
+        self.title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        header_layout.addWidget(self.title_label)
         layout.addWidget(self.header_row)
 
         self.body_frame = QFrame()
