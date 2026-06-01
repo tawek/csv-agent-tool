@@ -76,8 +76,6 @@ All changes follow a strict two-phase workflow with explicit review gates. **Nev
 
 **Every user statement must be treated as a potential change to the spec.** Before implementing any request, the agent must first update `docs/specification.md` to reflect the correct expected behavior, commit the spec change, and present it to the user for approval. This includes layout adjustments, button positions, tooltip text, icon behavior, and any other UI or behavioral detail.
 
-**Every user statement must be treated as a potential change to the spec.** Before implementing any request, the agent must first update `docs/specification.md` to reflect the correct expected behavior, commit the spec change, and present it to the user for approval. This includes layout adjustments, button positions, tooltip text, icon behavior, and any other UI or behavioral detail.
-
 ### Approval Gates
 
 At each phase boundary, you must stop and ask the user for explicit approval before proceeding. Never assume consent — always ask.
