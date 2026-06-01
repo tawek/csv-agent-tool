@@ -44,7 +44,7 @@ class CsvConfig:
             export_path=data.get("export-path", ""),
             export_only_visible=bool(data.get("export-only-visible", False)),
             fields=fields,
-            delimiter=data.get("delimiter", ",") or ",",
+            delimiter=data.get("delimiter", ";") or ";",
             quotechar=data.get("quotechar", '"') or '"',
             encoding=data.get("encoding", "utf-8-sig"),
             newline=data.get("newline", ""),
