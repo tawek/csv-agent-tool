@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
-hiddenimports = collect_submodules("PySide6.QtWebEngineWidgets")
+hiddenimports = []
 project_root = Path(SPEC).resolve().parent.parent
 
 block_cipher = None
