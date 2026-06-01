@@ -26,7 +26,7 @@ class FieldConfig:
 @dataclass(slots=True)
 class CsvConfig:
     export_path: str = ""
-    export_only_visible: bool = False
+    export_only_visible: bool = True
     fields: dict[str, FieldConfig] = field(default_factory=dict)
     delimiter: str = ";"
     quotechar: str = '"'

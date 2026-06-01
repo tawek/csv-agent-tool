@@ -604,7 +604,7 @@ class SettingsDialog(QDialog):
         form.addRow("Write header", self.write_header_checkbox)
         self.export_only_visible_checkbox = QCheckBox()
         self.export_only_visible_checkbox.setChecked(self._config.csv.export_only_visible)
-        form.addRow("Export only visible rows (default)", self.export_only_visible_checkbox)
+        form.addRow("Export only visible rows", self.export_only_visible_checkbox)
         layout.addLayout(form)
 
         columns_row = QHBoxLayout()
