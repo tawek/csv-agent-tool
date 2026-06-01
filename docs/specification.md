@@ -242,42 +242,78 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Postconditions:** The prompt template text is updated in the project definition and will be persisted on next save.
 
-## Use Case 25: Maximize Pane
+## Use Case 25: Panel Layout Management
 
 **Actor:** User
 
-**Description:** The user toggles a maximized mode for any pane, hiding the other two panes and giving the selected pane full window space.
+**Description:** The user controls the layout of the three panes (CSV Data, Prompts, Description) through minimize and maximize buttons. Each pane has a base state of collapsed (hidden) or expanded (visible). The pane layout derives a computed state—minimized, normalized (equalized), or maximized—based on the collapsed/expanded states of all three panes.
 
-**Trigger:** User clicks the maximize button (icon-only) in any pane header.
+**Preconditions:** The application window is open and all three panes are present.
 
-**Preconditions:** The application window is open and at least one pane is visible.
+### Base States
 
-**Flow:**
+Each pane has a binary base state:
+- **Collapsed:** The pane body is hidden; only the header row is visible.
+- **Expanded:** The pane body is visible and takes up layout space.
 
-1. Each pane header includes a maximize button (icon-only, unobtrusive).
-2. The user clicks the maximize button on any pane (CSV Data, Prompts, or Description).
-3. The application saves the current expanded state of all three panes.
-4. The clicked pane expands to fill the window.
-5. The other two panes are collapsed (hidden).
-6. All three maximize buttons switch to a "restore" state (icon changes to indicate restoration).
-7. On subsequent click of any maximize button, the user restores the original layout:
-   - All three panes return to their previously saved expanded states.
-   - All maximize buttons return to the "maximize" state.
-8. If a pane is maximized and the user clicks another pane's maximize button:
-   - The current maximized state is restored first (all panes return to saved states).
-   - Then the newly clicked pane is maximized instead.
-9. The button uses an icon only (no text label), consistent with the "unobtrusive" requirement. Icons suggest expanding or restoring.
+### Computed Layout State
 
-**Postconditions:** The window layout reflects the chosen state (maximized or restored). No data or functionality is affected — this is purely a UI layout change.
+The collective collapsed/expanded states of all three panes define the layout state:
 
-**Error conditions:** No error conditions. If panels have different expanded states before toggling, maximize overrides them all; restore returns each panel to its previously expanded state.
+- **Minimized:** A panel is minimized when its header minimize button was used to collapse it (collapsed), while at least one other panel remains expanded. The minimized panel contributes only its header height to the layout.
+- **Maximized:** A panel is maximized when it is expanded and both other panels are collapsed. The maximized panel fills the available window space.
+- **Normalized (Equalized):** All three panels are expanded, or exactly two panels are expanded and one is collapsed. The layout distributes space among all expanded panels.
+
+### Minimize Button Behavior
+
+The minimize button is positioned to the right of the header label. Its icon reflects the action the button will perform when clicked:
+- `=` (equal sign): The panel will be normalized (equalized with others).
+- `-` (minus sign): The panel will be minimized (collapsed).
+- `+` (plus sign): The panel will be maximized (fill window).
+
+Clicking the minimize button:
+1. If the panel is collapsed → expand it (toggle expanded to True).
+2. If the panel is expanded → collapse it (toggle expanded to False).
+
+The button icon updates after every state change to reflect what the next click will do.
+
+### Maximize Button Behavior
+
+The maximize button is positioned immediately after the minimize button (both to the right of the header label). Its icon reflects the action the button will perform when clicked:
+- `=` (equal sign): The panel will be normalized (equalized with others).
+- `-` (minus sign): The panel will be minimized (collapsed).
+- `+` (plus sign): The panel will be maximized (fill window).
+
+Clicking the maximize button:
+1. If the panel is collapsed → expand it, then collapse both other panels (maximize this panel).
+2. If the panel is expanded and the layout is already maximized → collapse the other two panels that were saved when maximization occurred (restore previous expanded states).
+3. If the panel is expanded and the layout is normalized → collapse both other panels (maximize this panel).
+
+### Trigger
+
+User clicks the minimize or maximize button in any pane header.
+
+### Flow
+
+1. Each pane header includes a toggle button (left of the header label, toggles collapsed/expanded), a minimize button (right of the header label), and a maximize button (right of the minimize button).
+2. Both minimize and maximize buttons display an icon (`+`, `-`, or `=`) that indicates what will happen when the button is clicked, based on the current layout state.
+3. When the minimize button is clicked, the panel's collapsed state is toggled.
+4. When the maximize button is clicked:
+   - If the layout is not maximized, the clicked panel is maximized (other two panels are collapsed).
+   - If the layout is maximized for this panel, the panel returns to normalized state (all panels are expanded).
+   - If another panel is maximized, the current maximized panel is restored to its expanded state and the clicked panel becomes maximized.
+5. After any button click, all three minimize and maximize buttons update their icons to reflect the impending action on the next click.
+
+**Postconditions:** The window layout reflects the chosen state (minimized, maximized, or normalized). No data or functionality is affected — this is purely a UI layout change.
+
+**Error conditions:** No error conditions.
 
 **Invariants:**
-- The maximize toggle is purely cosmetic — it does not affect data, processing, or any other application functionality.
-- On restore, each panel returns to the expanded state it had before any maximize was engaged.
+- The minimize/maximize toggle is purely cosmetic — it does not affect data, processing, or any other application functionality.
+- Each pane has both a minimize and a maximize button positioned to the right of the header label.
+- Both buttons use icons (`+`, `-`, `=`) that reflect the action they will perform on the next click.
 - The maximize state is shared across all three panes — only one pane can be maximized at a time.
-- Each pane has its own maximize button in its header row.
-- The button uses an icon only (no text label), consistent with the "unobtrusive" requirement.
+- A panel is maximized when it is expanded and both other panels are collapsed.
 
 ## Use Case 11: Preview a Single Row
 
