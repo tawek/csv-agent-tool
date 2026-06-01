@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+import re
 
 from PyInstaller.utils.hooks import collect_submodules
 
@@ -48,12 +49,39 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
 )
+
+# Filter out QML, translations, and unused Qt resources
+qml_pattern = re.compile(r'[/\\]qml[/\\]')
+translations_pattern = re.compile(r'[/\\]translations[/\\]')
+resources_pattern = re.compile(r'[/\\]resources[/\\]')
+unnecessary_plugins = re.compile(r'[/\\](?:position|wayland-shell-integration|qmltooling)[/\\]')
+
+def filter_items(items, pattern):
+    result = []
+    for item in items:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            dst = item[1]
+        else:
+            dst = item
+        if not pattern.search(str(dst)):
+            result.append(item)
+    return result
+
+a.datas = filter_items(a.datas, qml_pattern)
+a.datas = filter_items(a.datas, translations_pattern)
+a.datas = filter_items(a.datas, resources_pattern)
+a.datas = filter_items(a.datas, unnecessary_plugins)
+a.binaries = filter_items(a.binaries, qml_pattern)
+a.binaries = filter_items(a.binaries, translations_pattern)
+a.binaries = filter_items(a.binaries, resources_pattern)
+a.binaries = filter_items(a.binaries, unnecessary_plugins)
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
