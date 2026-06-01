@@ -133,7 +133,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 2. An `ExportDialog` opens with the following controls:
    - A **target path** text field pre-populated with the resolved target path from step 1.
    - A **Browse** button next to the target path field that opens a file save dialog to set the destination path.
-   - An **"Export only visible rows"** checkbox. The default state is determined by: first check the `export_only_visible` setting from the project CSV config; if not set, fall back to checking whether active filters exist (i.e., `filter_patterns` is non-empty).
+   - An **"Export only visible rows"** checkbox. The checkbox state reflects the `export_only_visible` setting from the project CSV config, propagated as-is. If no filters are active (i.e., `filter_patterns` is empty), the checkbox is grayed out and unchecked.
    - An **Export** button and a **Cancel** button.
 3. The user may adjust the target path by typing or clicking **Browse**.
 4. The user checks or unchecks the visibility option.
