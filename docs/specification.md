@@ -286,7 +286,7 @@ The maximize button is positioned immediately after the minimize button (both to
 
 Clicking the maximize button:
 1. If the panel is collapsed → expand it, then collapse both other panels (maximize this panel).
-2. If the panel is expanded and the layout is already maximized → collapse the other two panels that were saved when maximization occurred (restore previous expanded states).
+2. If the panel is expanded and the layout is already maximized → normalize (expand both other panels, equalizing layout).
 3. If the panel is expanded and the layout is normalized → collapse both other panels (maximize this panel).
 
 ### Trigger
@@ -300,8 +300,8 @@ User clicks the minimize or maximize button in any pane header.
 3. When the minimize button is clicked, the panel's collapsed state is toggled.
 4. When the maximize button is clicked:
    - If the layout is not maximized, the clicked panel is maximized (other two panels are collapsed).
-   - If the layout is maximized for this panel, the panel returns to normalized state (all panels are expanded).
-   - If another panel is maximized, the current maximized panel is restored to its expanded state and the clicked panel becomes maximized.
+   - If the layout is maximized for this panel, the layout returns to normalized state (all panels are expanded).
+   - If another panel is maximized, the current maximized panel is expanded and the clicked panel becomes maximized.
 5. After any button click, all three minimize and maximize buttons update their icons to reflect the impending action on the next click.
 
 **Postconditions:** The window layout reflects the chosen state (minimized, maximized, or normalized). No data or functionality is affected — this is purely a UI layout change.
@@ -314,6 +314,7 @@ User clicks the minimize or maximize button in any pane header.
 - Both buttons use icons (`+`, `-`, `=`) that reflect the action they will perform on the next click.
 - The maximize state is shared across all three panes — only one pane can be maximized at a time.
 - A panel is maximized when it is expanded and both other panels are collapsed.
+- Normalizing the layout expands all three panels equally — no previous states are saved or restored.
 
 ## Use Case 11: Preview a Single Row
 
