@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QStyle, QToolButton, QVBoxLayout, QWidget
 
 
 class _HeaderRow(QWidget):
@@ -80,7 +80,25 @@ class CollapsiblePanel(QWidget):
         self.title_label.setObjectName("panelTitle")
         self.title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         header_layout.addWidget(self.title_label)
-        header_layout.addStretch(1)
+
+        self.minimize_button = QToolButton()
+        self.minimize_button.setObjectName("panelMinimize")
+        self.minimize_button.setToolTip("Minimize")
+        self.minimize_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.minimize_button.setFixedSize(20, 20)
+        self.minimize_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.minimize_button.setStyleSheet(
+            """
+            QToolButton#panelMinimize {
+                border: none;
+                padding: 2px;
+            }
+            QToolButton#panelMinimize:hover {
+                background-color: palette(midlight);
+            }
+            """
+        )
+        header_layout.addWidget(self.minimize_button)
 
         self.maximize_button = QToolButton()
         self.maximize_button.setObjectName("panelMaximize")
@@ -120,9 +138,28 @@ class CollapsiblePanel(QWidget):
     def expanded(self) -> bool:
         return self._expanded
 
+    @property
+    def collapsed(self) -> bool:
+        return not self._expanded
+
     def header_height(self) -> int:
         margins = self.layout().contentsMargins()
         return self.header_row.sizeHint().height() + margins.top() + margins.bottom()
+
+    def is_minimized(self, all_panels: list[CollapsiblePanel]) -> bool:
+        return self.collapsed and len(all_panels) > 1
+
+    def is_normalized(self, all_panels: list[CollapsiblePanel]) -> bool:
+        return self.expanded and not self.is_maximized(all_panels)
+
+    def is_maximized(self, all_panels: list[CollapsiblePanel]) -> bool:
+        return self.expanded and not any(p.expanded for p in all_panels if p is not self)
+
+    def set_minimize_icon(self, icon: QIcon) -> None:
+        self.minimize_button.setIcon(icon)
+
+    def set_minimize_tooltip(self, tooltip: str) -> None:
+        self.minimize_button.setToolTip(tooltip)
 
     def set_maximize_icon(self, icon: QIcon) -> None:
         self.maximize_button.setIcon(icon)

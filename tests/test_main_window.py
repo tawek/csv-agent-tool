@@ -737,19 +737,21 @@ def test_pane_maximize_prompts_hides_other_panes(qtbot, tmp_path: Path) -> None:
     assert window.csv_panel.expanded
     assert window.prompt_panel.expanded
     assert window.description_panel.expanded
-    assert not window._pane_maximized
+    assert not window.prompt_panel.is_maximized(
+        [window.csv_panel, window.prompt_panel, window.description_panel]
+    )
 
     window.prompt_panel.maximize_button.clicked.emit()
 
-    assert window._pane_maximized
-    assert window._pane_maximized_name == "prompt"
+    assert window.prompt_panel.is_maximized(
+        [window.csv_panel, window.prompt_panel, window.description_panel]
+    )
     assert not window.csv_panel.expanded
     assert window.prompt_panel.expanded
     assert not window.description_panel.expanded
-    assert "Restore" in window.prompt_panel.maximize_button.toolTip()
 
 
-def test_pane_maximize_unmaximize_restores_previous_states(qtbot, tmp_path: Path) -> None:
+def test_pane_maximize_normalize_from_maximized(qtbot, tmp_path: Path) -> None:
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
@@ -757,71 +759,17 @@ def test_pane_maximize_unmaximize_restores_previous_states(qtbot, tmp_path: Path
     qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
 
     window.prompt_panel.maximize_button.click()
-    assert window._pane_maximized
-    assert not window.csv_panel.expanded
+    assert window.prompt_panel.is_maximized(
+        [window.csv_panel, window.prompt_panel, window.description_panel]
+    )
 
     window.prompt_panel.maximize_button.click()
 
-    assert not window._pane_maximized
+    assert window.prompt_panel.is_normalized(
+        [window.csv_panel, window.prompt_panel, window.description_panel]
+    )
     assert window.csv_panel.expanded
     assert window.prompt_panel.expanded
-    assert window.description_panel.expanded
-    assert "Maximize" in window.prompt_panel.maximize_button.toolTip()
-
-
-def test_pane_maximize_restores_different_initial_states(qtbot, tmp_path: Path) -> None:
-    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
-    qtbot.addWidget(window)
-    window.show()
-
-    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
-
-    window.csv_panel.set_expanded(False)
-    assert not window.csv_panel.expanded
-    assert window.prompt_panel.expanded
-    assert window.description_panel.expanded
-
-    window.prompt_panel.maximize_button.click()
-    assert window._pane_maximized
-
-    window.prompt_panel.maximize_button.click()
-
-    assert not window._pane_maximized
-    assert not window.csv_panel.expanded
-    assert window.prompt_panel.expanded
-    assert window.description_panel.expanded
-
-
-def test_pane_maximize_csv_data(qtbot, tmp_path: Path) -> None:
-    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
-    qtbot.addWidget(window)
-    window.show()
-
-    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
-
-    window.csv_panel.maximize_button.click()
-
-    assert window._pane_maximized
-    assert window._pane_maximized_name == "csv"
-    assert window.csv_panel.expanded
-    assert not window.prompt_panel.expanded
-    assert not window.description_panel.expanded
-
-
-def test_pane_maximize_description(qtbot, tmp_path: Path) -> None:
-    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
-    qtbot.addWidget(window)
-    qtbot.addWidget(window)
-    window.show()
-
-    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
-
-    window.description_panel.maximize_button.click()
-
-    assert window._pane_maximized
-    assert window._pane_maximized_name == "description"
-    assert not window.csv_panel.expanded
-    assert not window.prompt_panel.expanded
     assert window.description_panel.expanded
 
 
@@ -833,12 +781,15 @@ def test_pane_maximize_switch_panels(qtbot, tmp_path: Path) -> None:
     qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
 
     window.prompt_panel.maximize_button.click()
-    assert window._pane_maximized
-    assert window._pane_maximized_name == "prompt"
+    assert window.prompt_panel.is_maximized(
+        [window.csv_panel, window.prompt_panel, window.description_panel]
+    )
+    assert not window.csv_panel.expanded
 
     window.csv_panel.maximize_button.click()
-    assert window._pane_maximized
-    assert window._pane_maximized_name == "csv"
+    assert window.csv_panel.is_maximized(
+        [window.csv_panel, window.prompt_panel, window.description_panel]
+    )
     assert window.csv_panel.expanded
     assert not window.prompt_panel.expanded
     assert not window.description_panel.expanded
@@ -853,5 +804,6 @@ def test_pane_maximize_all_buttons_update(qtbot, tmp_path: Path) -> None:
 
     window.prompt_panel.maximize_button.click()
 
-    for panel in [window.csv_panel, window.prompt_panel, window.description_panel]:
-        assert "Restore" in panel.maximize_button.toolTip()
+    assert "Normalize" in window.prompt_panel.maximize_button.toolTip()
+    assert "Maximize" in window.csv_panel.maximize_button.toolTip()
+    assert "Maximize" in window.description_panel.maximize_button.toolTip()

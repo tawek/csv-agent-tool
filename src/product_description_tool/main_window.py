@@ -73,9 +73,6 @@ class MainWindow(QMainWindow):
         self._cancel_requested = False
         self._busy = False
         self._project_modified = False
-        self._pane_maximized = False
-        self._pane_maximized_name = ""
-        self._pane_maximized_states: dict[str, bool] = {}
         self.filter_patterns: dict[str, str] = {}
 
         self.table_model = CsvTableModel()
@@ -157,7 +154,7 @@ class MainWindow(QMainWindow):
         self.toggle_prompt_button.clicked.connect(self.toggle_current_prompt_enabled)
         prompt_header.addWidget(self.toggle_prompt_button)
 
-        self._connect_panel_maximize_buttons()
+        self._connect_panel_buttons()
 
         prompt_header.addStretch(1)
 
@@ -1244,70 +1241,71 @@ class MainWindow(QMainWindow):
             self.table_view.setColumnWidth(column, width)
         header.setStretchLastSection(False)
 
-    def _connect_panel_maximize_buttons(self) -> None:
-        self.csv_panel.maximize_button.clicked.connect(
-            lambda: self._toggle_pane_maximize("csv")
-        )
-        self.prompt_panel.maximize_button.clicked.connect(
-            lambda: self._toggle_pane_maximize("prompt")
-        )
-        self.description_panel.maximize_button.clicked.connect(
-            lambda: self._toggle_pane_maximize("description")
-        )
-        self._set_pane_maximize_icons()
-        self._update_pane_maximize_icons()
+    def _connect_panel_buttons(self) -> None:
+        panels = [self.csv_panel, self.prompt_panel, self.description_panel]
+        for panel in panels:
+            panel.minimize_button.clicked.connect(
+                lambda checked, p=panel: self._on_panel_minimize(p)
+            )
+            panel.maximize_button.clicked.connect(
+                lambda checked, p=panel: self._on_panel_maximize(p, panels)
+            )
+        self._update_panel_icons(panels)
 
-    def _set_pane_maximize_icons(self) -> None:
-        icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
-        for panel in [self.csv_panel, self.prompt_panel, self.description_panel]:
-            panel.set_maximize_icon(icon)
+    def _update_panel_icons(self, panels: list[CollapsiblePanel]) -> None:
+        all_icons = {
+            "+": self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarMaxButton),
+            "=": self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarNormalButton),
+            "-": self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarShadeButton),
+        }
+        for panel in panels:
+            next_minimize_action = "+" if panel.collapsed else "-"
+            next_maximize_action = self._next_maximize_action(panel, panels)
+            panel.set_minimize_icon(all_icons[next_minimize_action])
+            panel.set_minimize_tooltip(
+                "Expand" if next_minimize_action == "+" else "Collapse"
+            )
+            panel.set_maximize_icon(all_icons[next_maximize_action])
+            panel.set_maximize_tooltip(
+                {
+                    "+": "Maximize",
+                    "=": "Normalize",
+                    "-": "Minimize",
+                }.get(next_maximize_action, "")
+            )
 
-    def _update_pane_maximize_icons(self) -> None:
-        if self._pane_maximized:
-            restore_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack)
-            for panel in [self.csv_panel, self.prompt_panel, self.description_panel]:
-                panel.set_maximize_icon(restore_icon)
-                panel.set_maximize_tooltip("Restore")
+    def _next_maximize_action(self, panel: CollapsiblePanel, panels: list[CollapsiblePanel]) -> str:
+        if panel.is_maximized(panels):
+            return "="
+        elif panel.collapsed:
+            return "+"
         else:
-            expand_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
-            for panel in [self.csv_panel, self.prompt_panel, self.description_panel]:
-                panel.set_maximize_icon(expand_icon)
-                panel.set_maximize_tooltip("Maximize")
+            return "-"
 
-    def _toggle_pane_maximize(self, panel_name: str) -> None:
+    def _on_panel_minimize(self, panel: CollapsiblePanel) -> None:
+        panels = [self.csv_panel, self.prompt_panel, self.description_panel]
+        panel.set_expanded(not panel.expanded)
+        self._rebalance_panel_sizes()
+        self._update_panel_icons(panels)
 
-        if not self._pane_maximized:
-            self._pane_maximized = True
-            self._pane_maximized_name = panel_name
-            self._pane_maximized_states = {
-                "csv": self.csv_panel.expanded,
-                "prompt": self.prompt_panel.expanded,
-                "description": self.description_panel.expanded,
-            }
-            for key, expanded in self._pane_maximized_states.items():
-                p = {"csv": self.csv_panel, "prompt": self.prompt_panel, "description": self.description_panel}[key]
-                if key != panel_name:
-                    p.set_expanded(False)
-        elif self._pane_maximized_name != panel_name:
-            self._pane_maximized_name = panel_name
-            self._pane_maximized_states = {
-                "csv": self.csv_panel.expanded,
-                "prompt": self.prompt_panel.expanded,
-                "description": self.description_panel.expanded,
-            }
-            for key, expanded in self._pane_maximized_states.items():
-                p = {"csv": self.csv_panel, "prompt": self.prompt_panel, "description": self.description_panel}[key]
-                if key != panel_name:
-                    p.set_expanded(False)
-                else:
+    def _on_panel_maximize(self, panel: CollapsiblePanel, panels: list[CollapsiblePanel]) -> None:
+        if panel.is_maximized(panels):
+            for p in panels:
+                p.set_expanded(True)
+        elif panel.collapsed:
+            for p in panels:
+                if p is panel:
                     p.set_expanded(True)
+                else:
+                    p.set_expanded(False)
         else:
-            self._pane_maximized = False
-            for key, expanded in self._pane_maximized_states.items():
-                p = {"csv": self.csv_panel, "prompt": self.prompt_panel, "description": self.description_panel}[key]
-                p.set_expanded(expanded)
-
-        self._update_pane_maximize_icons()
+            for p in panels:
+                if p is panel:
+                    p.set_expanded(True)
+                else:
+                    p.set_expanded(False)
+        self._rebalance_panel_sizes()
+        self._update_panel_icons(panels)
 
     def _rebalance_panel_sizes(self, *_args) -> None:
         panels = [self.csv_panel, self.prompt_panel, self.description_panel]
