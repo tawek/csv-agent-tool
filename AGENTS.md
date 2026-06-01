@@ -57,6 +57,7 @@ uv run pyinstaller packaging/product_description_tool.spec
 - `README.md`: short project overview, setup, and top-level entry points.
 - `docs/`: capability-specific documentation for future agents and maintainers.
 - `docs/project.md`: current reference for the application project model and lifecycle.
+- `docs/build-windows.md`: complete procedure for building Windows executables via SSH remote machine.
 
 When a feature needs deeper explanation than a short README note, add or extend a focused document under `docs/`.
 

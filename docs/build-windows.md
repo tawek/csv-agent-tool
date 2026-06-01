@@ -12,56 +12,54 @@ Build a Windows executable for Product Description Tool using a remote Windows m
 
 ---
 
-## Step 1 — Create a Virtual Environment on Remote
+## Prerequisites
 
-The system Python installed by uv is externally managed. Use `venv` to get an isolated environment with pip and PyInstaller.
+The remote build environment (venv + dependencies) is set up once. Subsequent builds only need steps 4–7.
+
+### One-Time Setup (Steps 1–3)
+
+**Step 1 — Create a Virtual Environment on Remote**
 
 ```bash
 ssh gfl@192.168.1.13 \
   'cmd.exe /c "C:\Users\gfl\AppData\Roaming\uv\python\cpython-3.12.13-windows-x86_64-none\python.exe -m venv C:\Users\gfl\build-env"'
 ```
 
-Upgrade pip in the venv:
+Upgrade pip:
 
 ```bash
 ssh gfl@192.168.1.13 \
   'cmd.exe /c "C:\Users\gfl\build-env\Scripts\python.exe -m pip install --upgrade pip"'
 ```
 
----
-
-## Step 2 — Install Dependencies on Remote
+**Step 2 — Install Dependencies on Remote**
 
 ```bash
 ssh gfl@192.168.1.13 \
   'cmd.exe /c "C:\Users\gfl\build-env\Scripts\python.exe -m pip install pyinstaller httpx openai platformdirs PySide6"'
 ```
 
-This downloads PySide6 (~250 MB combined addons) and all transitive dependencies. Expect 2–5 minutes depending on network speed.
+This downloads PySide6 (~250 MB). Expect 2–5 minutes.
 
----
-
-## Step 3 — Get the Source Code on Remote
-
-**Option A — Clone from GitHub** (requires SSH keys or HTTPS credentials configured on the remote):
+**Step 3 — Clone Source on Remote**
 
 ```bash
 ssh gfl@192.168.1.13 'cd /home/gfl && git clone git@github.com:tawek/csv-agent-tool.git csv-agent-tool'
 ```
 
-**Option B — Archive from local machine** (no git credentials needed):
-
-```bash
-cd /home/tawek/projects/csv-agent-tool   # or wherever the repo lives locally
-ssh gfl@192.168.1.13 'mkdir -p /home/gfl/csv-agent-tool'
-git archive --format=tar HEAD | ssh gfl@192.168.1.13 'tar -xC /home/gfl/csv-agent-tool'
-```
-
 ---
 
-## Step 4 — Build with PyInstaller
+## Standard Build (Steps 4–7)
 
-Use the native Windows Python (not the Cygwin path), set `PYTHONPATH`, and run from the project root:
+**Step 4 — Sync Fresh Source via Archive**
+
+Always push the latest local source to the remote to avoid stale builds. Use `git archive` piped over SSH — this pushes only the current HEAD without requiring git on the remote:
+
+```bash
+git archive --format=tar HEAD | ssh gfl@192.168.1.13 'tar -xC /home/gfl/csv-agent-tool --strip-components=0'
+```
+
+**Step 5 — Build with PyInstaller**
 
 ```bash
 ssh gfl@192.168.1.13 \
@@ -72,18 +70,16 @@ ssh gfl@192.168.1.13 \
 - `PYTHONPATH` must point to the `src/` directory inside the project root.
 - Use `cd /d` (not just `cd`) in cmd.exe to handle path changes across filesystem boundaries.
 - The project lives under `C:\cygwin64\home\gfl\...` on the Windows side (visible via `cmd.exe`), NOT under `C:\Users\gfl\...`.
-- Output directory: `/home/gfl/csv-agent-tool/dist/product-description-tool/` (accessible in Cygwin as `/home/gfl/csv-agent-tool/dist/`).
+- Output directory: `/home/gfl/csv-agent-tool/dist/product-description-tool/`.
 
 Build takes ~2 minutes.
 
----
+**Step 6 — Retrieve the Build (Tar Stream)**
 
-## Step 5 — Retrieve the Build
-
-Copy the entire dist folder back locally:
+Do **not** use `scp` — it is extremely slow for 500+ MB of small files. Use tar streaming instead:
 
 ```bash
-scp -r gfl@192.168.1.13:/home/gfl/csv-agent-tool/dist/product-description-tool /tmp/product-description-tool-windows
+ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-description-tool' | tar -C /tmp -xzf -
 ```
 
 The output includes:
@@ -92,20 +88,19 @@ The output includes:
 
 **You must ship the entire directory.** The exe won't run without the `_internal` folder.
 
----
+**Step 7 — Upload to Google Drive**
 
-## Step 6 — Upload to Google Drive
+Check rclone token expiry first. If expired, re-authenticate:
 
 ```bash
-rclone copy /tmp/product-description-tool-windows/ GoogleDrive:WFirma/product-description-tool/ \
+rclone ls GoogleDrive:WFirma/product-description-tool/ > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+  echo "Token expired. Re-authorizing..."
+  rclone authorize "drive" "<client_id> <client_secret>"
+fi
+
+rclone copy /tmp/product-description-tool/ GoogleDrive:WFirma/product-description-tool/ \
   --transfers=4 --checkers=8
-```
-
-Silent mode (no progress output). For progress logging:
-
-```bash
-rclone copy /tmp/product-description-tool-windows/ GoogleDrive:WFirma/product-description-tool/ \
-  --transfers=4 --checkers=8 >> /tmp/rclone-upload.log 2>&1 &
 ```
 
 Verify completion:
@@ -113,6 +108,28 @@ Verify completion:
 ```bash
 rclone size GoogleDrive:WFirma/product-description-tool/
 # Should report ~2965 objects, ~566 MiB
+```
+
+---
+
+## Full One-Liner (Complete Build)
+
+```bash
+# 1. Sync fresh source
+git archive --format=tar HEAD | ssh gfl@192.168.1.13 'tar -xC /home/gfl/csv-agent-tool'
+
+# 2. Build
+ssh gfl@192.168.1.13 \
+  'cmd.exe /c "set PYTHONPATH=C:\cygwin64\home\gfl\csv-agent-tool\src && cd /d C:\cygwin64\home\gfl\csv-agent-tool && C:\Users\gfl\build-env\Scripts\python.exe -m PyInstaller --clean --noconfirm packaging\product_description_tool.spec"'
+
+# 3. Retrieve via tar stream
+ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-description-tool' | tar -C /tmp -xzf -
+
+# 4. Check token and upload
+rclone ls GoogleDrive:WFirma/product-description-tool/ > /dev/null 2>&1 || \
+  rclone authorize "drive" "<client_id> <client_secret>"
+rclone copy /tmp/product-description-tool/ GoogleDrive:WFirma/product-description-tool/ \
+  --transfers=4 --checkers=8
 ```
 
 ---
@@ -143,32 +160,16 @@ The remote machine does not have `uv` in its PATH. All Python operations must us
 
 PyInstaller may log: `WARNING: Hidden import "tzdata" not found!`. This is harmless — PySide6 uses zoneinfo data from the standard library on Python 3.9+. The build succeeds regardless.
 
----
+### rclone token expired
 
-## Full One-Liner (Everything in Sequence)
-
-For convenience, here is the complete sequence to build from scratch:
+If `rclone ls GoogleDrive:...` fails with "couldn't fetch token: invalid_grant", re-authorize:
 
 ```bash
-# 1. Create venv
-ssh gfl@192.168.1.13 \
-  'cmd.exe /c "C:\Users\gfl\AppData\Roaming\uv\python\cpython-3.12.13-windows-x86_64-none\python.exe -m venv C:\Users\gfl\build-env"'
-
-# 2. Upgrade pip
-ssh gfl@192.168.1.13 \
-  'cmd.exe /c "C:\Users\gfl\build-env\Scripts\python.exe -m pip install --upgrade pip"'
-
-# 3. Install deps
-ssh gfl@192.168.1.13 \
-  'cmd.exe /c "C:\Users\gfl\build-env\Scripts\python.exe -m pip install pyinstaller httpx openai platformdirs PySide6"'
-
-# 4. Clone repo (if needed)
-ssh gfl@192.168.1.13 'cd /home/gfl && git clone git@github.com:tawek/csv-agent-tool.git csv-agent-tool'
-
-# 5. Build
-ssh gfl@192.168.1.13 \
-  'cmd.exe /c "set PYTHONPATH=C:\cygwin64\home\gfl\csv-agent-tool\src && cd /d C:\cygwin64\home\gfl\csv-agent-tool && C:\Users\gfl\build-env\Scripts\python.exe -m PyInstaller --clean --noconfirm packaging\product_description_tool.spec"'
-
-# 6. Copy back
-scp -r gfl@192.168.1.13:/home/gfl/csv-agent-tool/dist/product-description-tool /tmp/product-description-tool-windows
+rclone authorize "drive" "<client_id> <client_secret>"
 ```
+
+**Never use `rclone config` interactively** — it corrupts the config file if interrupted. Always use `rclone authorize` which writes to the same token field non-interactively.
+
+### `scp` is too slow for the build directory
+
+`scp -r` on a 500+ MB directory with thousands of small files can take 10+ minutes. Use the tar streaming method in Step 6 instead.
