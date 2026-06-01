@@ -14,7 +14,7 @@ Build a Windows executable for Product Description Tool using a remote Windows m
 
 ## Prerequisites
 
-The remote build environment (venv + dependencies) is set up once. Subsequent builds only need steps 4–7.
+The remote build environment (venv + dependencies) is set up once. Subsequent builds only need steps 4–10.
 
 ### One-Time Setup (Steps 1–3)
 
@@ -50,6 +50,14 @@ ssh gfl@192.168.1.13 'cd /home/gfl && git clone git@github.com:tawek/csv-agent-t
 ---
 
 ## Standard Build (Steps 4–7)
+
+### Clean Temp Directory
+
+Always use a unique, timestamped temp directory for each build to avoid stale/corrupted data from previous builds:
+
+```bash
+BUILD_DIR="/tmp/product-description-tool-$(date +%Y%m%d-%H%M%S)"
+```
 
 **Step 4 — Check for Running Build**
 
@@ -111,16 +119,23 @@ The `install.bat` script copies the application from wherever it was downloaded 
 Do **not** use `scp` — it is extremely slow for 500+ MB of small files. Use tar streaming instead:
 
 ```bash
-ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-description-tool' | tar -C /tmp -xzf -
+BUILD_DIR="/tmp/product-description-tool-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BUILD_DIR"
+ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-description-tool' | tar -C "$BUILD_DIR" -xzf -
 ```
 
 The output includes:
 - `product-description-tool.exe` (~7 MB, the entry point)
-- `_internal/` (~150-170 MB, all Qt DLLs, Python extensions, bundled packages)
+- `_internal/` (~110-130 MB with spec filters, all Qt DLLs, Python extensions, bundled packages)
 
-**You must ship the entire directory.** The exe won't run without the `_internal` folder.
+**Verify size before upload:**
 
-**Step 11 — Upload to Google Drive**
+```bash
+du -sh "$BUILD_DIR/product-description-tool/"
+# Should be ~120 MB total. If ~550 MB+, the spec excludes were not applied — do NOT upload.
+```
+
+**Step 9 — Upload to Google Drive**
 
 Check rclone token expiry first. If expired, re-authenticate:
 
@@ -131,7 +146,7 @@ if [ $? -ne 0 ]; then
   rclone authorize "drive" "<client_id> <client_secret>"
 fi
 
-rclone copy /tmp/product-description-tool/ GoogleDrive:WFirma/product-description-tool/ \
+rclone copy "$BUILD_DIR/product-description-tool/" GoogleDrive:WFirma/product-description-tool/ \
   --transfers=4 --checkers=8
 ```
 
@@ -139,7 +154,7 @@ Verify completion:
 
 ```bash
 rclone size GoogleDrive:WFirma/product-description-tool/
-# Should report ~800-1000 objects, ~170-200 MiB
+# Should report ~170-200 objects, ~120-140 MiB
 ```
 
 ---
@@ -147,6 +162,10 @@ rclone size GoogleDrive:WFirma/product-description-tool/
 ## Full One-Liner (Complete Build)
 
 ```bash
+# 0. Setup clean build directory
+BUILD_DIR="/tmp/product-description-tool-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BUILD_DIR"
+
 # 1. Check for running build and wait
 ssh gfl@192.168.1.13 \
   'if ! mkdir /home/gfl/.build.lock 2>/dev/null; then echo "Build already running, waiting..."; while ! mkdir /home/gfl/.build.lock 2>/dev/null; do sleep 5; done; fi'
@@ -162,16 +181,24 @@ ssh gfl@192.168.1.13 \
 scp packaging/install.bat gfl@192.168.1.13:/home/gfl/csv-agent-tool/dist/product-description-tool/
 
 # 5. Retrieve via tar stream
-ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-description-tool' | tar -C /tmp -xzf -
+ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-description-tool' | tar -C "$BUILD_DIR" -xzf -
 
-# 6. Check token and upload
+# 6. Verify size before upload
+du -sh "$BUILD_DIR/product-description-tool/"
+# If >200 MB, abort — spec excludes were not applied correctly
+
+# 7. Check token and upload
 rclone ls GoogleDrive:WFirma/product-description-tool/ > /dev/null 2>&1 || \
   rclone authorize "drive" "<client_id> <client_secret>"
-rclone copy /tmp/product-description-tool/ GoogleDrive:WFirma/product-description-tool/ \
+rclone copy "$BUILD_DIR/product-description-tool/" GoogleDrive:WFirma/product-description-tool/ \
   --transfers=4 --checkers=8
 
-# 7. Verify size (should be ~170-200 MB, not 500+ MB)
-ls -lh /tmp/product-description-tool/
+# 8. Verify size
+rclone size GoogleDrive:WFirma/product-description-tool/
+# Should report ~170-200 objects, ~120-140 MiB
+
+# 9. Clean up temp directory (only on success — leave on failure for post-mortem)
+rclone size GoogleDrive:WFirma/product-description-tool/ >/dev/null 2>&1 && rm -rf "$BUILD_DIR"
 ```
 
 ---
