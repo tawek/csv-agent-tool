@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QStyle, QToolButton, QVBoxLayout, QWidget
 
 
@@ -24,19 +24,6 @@ class CollapsiblePanel(QWidget):
             """
             QWidget#panelHeaderRow {
                 background-color: transparent;
-            }
-            QToolButton#panelToggle {
-                background-color: palette(button);
-                color: palette(button-text);
-                border: none;
-                border-radius: 0;
-                padding: 4px 6px 4px 4px;
-                min-height: 20px;
-                font-weight: 600;
-                text-align: left;
-            }
-            QToolButton#panelToggle:hover {
-                background-color: palette(midlight);
             }
             QLabel#panelTitle {
                 color: palette(button-text);
@@ -63,18 +50,6 @@ class CollapsiblePanel(QWidget):
         header_layout = QHBoxLayout(self.header_row)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(0)
-
-        self.toggle_button = QToolButton()
-        self.toggle_button.setObjectName("panelToggle")
-        self.toggle_button.setCheckable(True)
-        self.toggle_button.setChecked(True)
-        self.toggle_button.setText("")
-        self.toggle_button.setFixedWidth(20)
-        self.toggle_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self.toggle_button.setArrowType(Qt.ArrowType.DownArrow)
-        self.toggle_button.setAutoRaise(True)
-        self.toggle_button.clicked.connect(self.set_expanded)
-        header_layout.addWidget(self.toggle_button)
 
         self.title_label = QLabel(title)
         self.title_label.setObjectName("panelTitle")
@@ -179,9 +154,5 @@ class CollapsiblePanel(QWidget):
 
     def set_expanded(self, expanded: bool) -> None:
         self._expanded = bool(expanded)
-        self.toggle_button.setChecked(self._expanded)
-        self.toggle_button.setArrowType(
-            Qt.ArrowType.DownArrow if self._expanded else Qt.ArrowType.RightArrow
-        )
         self.body_frame.setVisible(self._expanded)
         self.toggled.emit(self._expanded)

@@ -295,7 +295,7 @@ User clicks the minimize or maximize button in any pane header.
 
 ### Flow
 
-1. Each pane header includes a toggle button (left of the header label, toggles collapsed/expanded), a minimize button (right of the header label), and a maximize button (right of the minimize button).
+1. Each pane header includes a minimize button (left of the header label) and a maximize button (right of the minimize button, also left of the header label).
 2. Both minimize and maximize buttons display an icon (`+`, `-`, or `=`) that indicates what will happen when the button is clicked, based on the current layout state.
 3. When the minimize button is clicked, the panel's collapsed state is toggled.
 4. When the maximize button is clicked:
@@ -310,8 +310,8 @@ User clicks the minimize or maximize button in any pane header.
 
 **Invariants:**
 - The minimize/maximize toggle is purely cosmetic — it does not affect data, processing, or any other application functionality.
-- Each pane has both a minimize and a maximize button positioned to the right of the header label.
-- Both buttons use icons (`+`, `-`, `=`) that reflect the action they will perform on the next click.
+- Each pane has both a minimize and a maximize button positioned to the left of the header label.
+- Both buttons use text symbols (`+`, `-`, `=`) that reflect the action they will perform on the next click. The minimize button only ever shows `-` (minimize) or `=` (normalize). The maximize button only ever shows `+` (maximize) or `=` (normalize).
 - The maximize state is shared across all three panes — only one pane can be maximized at a time.
 - A panel is maximized when it is expanded and both other panels are collapsed.
 - Normalizing the layout expands all three panels equally — no previous states are saved or restored.

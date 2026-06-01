@@ -833,11 +833,11 @@ def test_pane_minimize_button_icon(qtbot, tmp_path: Path) -> None:
     qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
 
     assert window.csv_panel.minimize_button.text() == "-"
-    assert "Collapse" in window.csv_panel.minimize_button.toolTip()
+    assert "Minimize" in window.csv_panel.minimize_button.toolTip()
 
     window.csv_panel.minimize_button.click()
-    assert window.csv_panel.minimize_button.text() == "+"
-    assert "Expand" in window.csv_panel.minimize_button.toolTip()
+    assert window.csv_panel.minimize_button.text() == "="
+    assert "Normalize" in window.csv_panel.minimize_button.toolTip()
 
 
 def test_pane_maximize_button_icon_from_normalized(qtbot, tmp_path: Path) -> None:
