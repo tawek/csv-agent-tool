@@ -807,3 +807,135 @@ def test_pane_maximize_all_buttons_update(qtbot, tmp_path: Path) -> None:
     assert "Normalize" in window.prompt_panel.maximize_button.toolTip()
     assert "Maximize" in window.csv_panel.maximize_button.toolTip()
     assert "Maximize" in window.description_panel.maximize_button.toolTip()
+
+
+def test_pane_minimize_button_collapses_panel(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    panels = [window.csv_panel, window.prompt_panel, window.description_panel]
+    assert window.csv_panel.expanded
+    assert not window.csv_panel.collapsed
+
+    window.csv_panel.minimize_button.click()
+    assert not window.csv_panel.expanded
+    assert window.csv_panel.collapsed
+
+
+def test_pane_minimize_button_icon(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    assert window.csv_panel.minimize_button.text() == "-"
+    assert "Collapse" in window.csv_panel.minimize_button.toolTip()
+
+    window.csv_panel.minimize_button.click()
+    assert window.csv_panel.minimize_button.text() == "+"
+    assert "Expand" in window.csv_panel.minimize_button.toolTip()
+
+
+def test_pane_maximize_button_icon_from_normalized(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    assert window.csv_panel.maximize_button.text() == "+"
+    assert "Maximize" in window.csv_panel.maximize_button.toolTip()
+
+
+def test_pane_maximize_button_icon_from_maximized(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    window.csv_panel.maximize_button.click()
+    assert window.csv_panel.is_maximized(
+        [window.csv_panel, window.prompt_panel, window.description_panel]
+    )
+    assert window.csv_panel.maximize_button.text() == "="
+    assert "Normalize" in window.csv_panel.maximize_button.toolTip()
+
+
+def test_pane_maximize_from_normalized_to_maximized(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    panels = [window.csv_panel, window.prompt_panel, window.description_panel]
+    assert window.csv_panel.is_normalized(panels)
+    assert not window.csv_panel.is_maximized(panels)
+    assert not window.csv_panel.is_minimized(panels)
+
+    window.csv_panel.maximize_button.click()
+
+    assert window.csv_panel.is_maximized(panels)
+    assert not window.prompt_panel.expanded
+    assert not window.description_panel.expanded
+
+
+def test_pane_maximize_from_maximized_to_normalized(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    panels = [window.csv_panel, window.prompt_panel, window.description_panel]
+    window.csv_panel.maximize_button.click()
+    assert window.csv_panel.is_maximized(panels)
+
+    window.csv_panel.maximize_button.click()
+    assert window.csv_panel.is_normalized(panels)
+    assert window.csv_panel.expanded
+    assert window.prompt_panel.expanded
+    assert window.description_panel.expanded
+
+
+def test_pane_maximize_from_collapsed_to_maximized(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    panels = [window.csv_panel, window.prompt_panel, window.description_panel]
+    window.csv_panel.minimize_button.click()
+    assert window.csv_panel.collapsed
+
+    window.csv_panel.maximize_button.click()
+    assert window.csv_panel.is_maximized(panels)
+    assert window.csv_panel.expanded
+    assert not window.prompt_panel.expanded
+    assert not window.description_panel.expanded
+
+
+def test_pane_switch_maximized_panel(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    panels = [window.csv_panel, window.prompt_panel, window.description_panel]
+
+    window.csv_panel.maximize_button.click()
+    assert window.csv_panel.is_maximized(panels)
+    assert not window.prompt_panel.expanded
+    assert not window.description_panel.expanded
+
+    window.prompt_panel.maximize_button.click()
+    assert window.prompt_panel.is_maximized(panels)
+    assert not window.csv_panel.expanded
+    assert not window.description_panel.expanded

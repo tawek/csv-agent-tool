@@ -1262,20 +1262,13 @@ class MainWindow(QMainWindow):
             )
             panel.set_maximize_icon(next_maximize_action)
             panel.set_maximize_tooltip(
-                {
-                    "+": "Maximize",
-                    "=": "Normalize",
-                    "-": "Minimize",
-                }.get(next_maximize_action, "")
+                "Maximize" if next_maximize_action == "+" else "Normalize"
             )
 
     def _next_maximize_action(self, panel: CollapsiblePanel, panels: list[CollapsiblePanel]) -> str:
         if panel.is_maximized(panels):
             return "="
-        elif panel.collapsed:
-            return "+"
-        else:
-            return "-"
+        return "+"
 
     def _on_panel_minimize(self, panel: CollapsiblePanel) -> None:
         panels = [self.csv_panel, self.prompt_panel, self.description_panel]
