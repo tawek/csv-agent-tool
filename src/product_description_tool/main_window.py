@@ -1253,19 +1253,14 @@ class MainWindow(QMainWindow):
         self._update_panel_icons(panels)
 
     def _update_panel_icons(self, panels: list[CollapsiblePanel]) -> None:
-        all_icons = {
-            "+": self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarMaxButton),
-            "=": self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarNormalButton),
-            "-": self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarShadeButton),
-        }
         for panel in panels:
             next_minimize_action = "+" if panel.collapsed else "-"
             next_maximize_action = self._next_maximize_action(panel, panels)
-            panel.set_minimize_icon(all_icons[next_minimize_action])
+            panel.set_minimize_icon(next_minimize_action)
             panel.set_minimize_tooltip(
                 "Expand" if next_minimize_action == "+" else "Collapse"
             )
-            panel.set_maximize_icon(all_icons[next_maximize_action])
+            panel.set_maximize_icon(next_maximize_action)
             panel.set_maximize_tooltip(
                 {
                     "+": "Maximize",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QStyle, QToolButton, QVBoxLayout, QWidget
 
 
@@ -84,14 +84,19 @@ class CollapsiblePanel(QWidget):
         self.minimize_button = QToolButton()
         self.minimize_button.setObjectName("panelMinimize")
         self.minimize_button.setToolTip("Minimize")
-        self.minimize_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.minimize_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.minimize_button.setFixedSize(20, 20)
         self.minimize_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        font = QFont()
+        font.setBold(True)
+        font.setPixelSize(14)
+        self.minimize_button.setFont(font)
         self.minimize_button.setStyleSheet(
             """
             QToolButton#panelMinimize {
                 border: none;
                 padding: 2px;
+                color: palette(button-text);
             }
             QToolButton#panelMinimize:hover {
                 background-color: palette(midlight);
@@ -103,14 +108,16 @@ class CollapsiblePanel(QWidget):
         self.maximize_button = QToolButton()
         self.maximize_button.setObjectName("panelMaximize")
         self.maximize_button.setToolTip("Maximize")
-        self.maximize_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.maximize_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.maximize_button.setFixedSize(20, 20)
         self.maximize_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.maximize_button.setFont(font)
         self.maximize_button.setStyleSheet(
             """
             QToolButton#panelMaximize {
                 border: none;
                 padding: 2px;
+                color: palette(button-text);
             }
             QToolButton#panelMaximize:hover {
                 background-color: palette(midlight);
@@ -155,14 +162,14 @@ class CollapsiblePanel(QWidget):
     def is_maximized(self, all_panels: list[CollapsiblePanel]) -> bool:
         return self.expanded and not any(p.expanded for p in all_panels if p is not self)
 
-    def set_minimize_icon(self, icon: QIcon) -> None:
-        self.minimize_button.setIcon(icon)
+    def set_minimize_icon(self, symbol: str) -> None:
+        self.minimize_button.setText(symbol)
 
     def set_minimize_tooltip(self, tooltip: str) -> None:
         self.minimize_button.setToolTip(tooltip)
 
-    def set_maximize_icon(self, icon: QIcon) -> None:
-        self.maximize_button.setIcon(icon)
+    def set_maximize_icon(self, symbol: str) -> None:
+        self.maximize_button.setText(symbol)
 
     def set_maximize_tooltip(self, tooltip: str) -> None:
         self.maximize_button.setToolTip(tooltip)
