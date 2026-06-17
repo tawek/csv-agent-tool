@@ -5,7 +5,7 @@ from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import QGroupBox, QMessageBox
 
 from product_description_tool.config import AppConfig, ConfigStore, FieldConfig
-from product_description_tool.generation import USER_PROMPT
+from product_description_tool.generation import PromptPayload, USER_PROMPT
 from product_description_tool.main_window import MainWindow
 from product_description_tool.project import ProjectPrompt
 from product_description_tool.providers import GenerationCancelled
@@ -25,8 +25,17 @@ class FakeDialog:
 
 
 class FakeGenerationService:
-    def validate_template(self, template: str, headers: list[str]) -> None:
+    def validate_template(self, template: str, headers: list[str], knowledge_base_dir=None) -> None:
         return None
+
+    def prepare_prompt(self, *, template: str, row: dict[str, str], knowledge_base_dir=None):
+        rendered = template
+        for col, val in row.items():
+            rendered = rendered.replace("{{" + col + "}}", val)
+        return PromptPayload(
+            system_prompt=rendered,
+            user_prompt=USER_PROMPT,
+        )
 
     class _PromptPayload:
         def __init__(self, input_char_count: int) -> None:
@@ -39,6 +48,7 @@ class FakeGenerationService:
         row,
         template,
         config,
+        knowledge_base_dir=None,
         on_prompt_ready=None,
         on_chunk=None,
         should_cancel=None,
@@ -61,6 +71,7 @@ class FakeGenerationService:
         rows,
         template,
         config,
+        knowledge_base_dir=None,
         on_result=None,
         on_prompt_ready=None,
         on_chunk=None,
@@ -95,6 +106,7 @@ class SlowCancellableGenerationService(FakeGenerationService):
         row,
         template,
         config,
+        knowledge_base_dir=None,
         on_prompt_ready=None,
         on_chunk=None,
         should_cancel=None,
@@ -105,6 +117,7 @@ class SlowCancellableGenerationService(FakeGenerationService):
             row=row,
             template=template,
             config=config,
+            knowledge_base_dir=knowledge_base_dir,
             on_prompt_ready=on_prompt_ready,
             on_chunk=on_chunk,
             should_cancel=should_cancel,
@@ -125,6 +138,7 @@ class BlockingCancellableGenerationService(FakeGenerationService):
         row,
         template,
         config,
+        knowledge_base_dir=None,
         on_prompt_ready=None,
         on_chunk=None,
         should_cancel=None,
@@ -153,6 +167,7 @@ class DelayedCancelGenerationService(FakeGenerationService):
         row,
         template,
         config,
+        knowledge_base_dir=None,
         on_prompt_ready=None,
         on_chunk=None,
         should_cancel=None,
@@ -939,3 +954,247 @@ def test_pane_switch_maximized_panel(qtbot, tmp_path: Path) -> None:
     assert window.prompt_panel.is_maximized(panels)
     assert not window.csv_panel.expanded
     assert not window.description_panel.expanded
+
+
+class TestKnowledgeBaseDirectoryUI:
+    """UI-level tests for the knowledge-base directory feature."""
+
+    def test_set_kb_directory_updates_project_and_indicator(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        kb_dir = tmp_path / "my_kb"
+        kb_dir.mkdir()
+        monkeypatch.setattr(
+            "product_description_tool.main_window.QFileDialog.getExistingDirectory",
+            lambda *args, **kwargs: str(kb_dir),
+        )
+
+        window._set_kb_directory()
+
+        assert window.project.knowledge_base_dir == str(kb_dir)
+        assert window.kb_label.text() == f"KB: {kb_dir}"
+        assert window.kb_label.toolTip() == str(kb_dir)
+        assert window.isWindowModified()
+
+    def test_set_kb_directory_cancelled_does_nothing(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        monkeypatch.setattr(
+            "product_description_tool.main_window.QFileDialog.getExistingDirectory",
+            lambda *args, **kwargs: "",
+        )
+
+        original_kb = window.project.knowledge_base_dir
+        window._set_kb_directory()
+
+        assert window.project.knowledge_base_dir == original_kb
+        assert not window.isWindowModified()
+
+    def test_clear_kb_directory_clears_project_and_indicator(
+        self, qtbot, tmp_path: Path,
+    ) -> None:
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        window.project.knowledge_base_dir = str(tmp_path / "some_kb")
+        window._set_project_modified(False)
+        window._update_kb_indicator()
+
+        assert window.kb_label.text() != ""
+
+        window._clear_kb_directory()
+
+        assert window.project.knowledge_base_dir is None
+        assert window.kb_label.text() == ""
+        assert window.kb_label.toolTip() == ""
+        assert window.isWindowModified()
+
+    def test_clear_kb_directory_when_already_none_does_nothing(
+        self, qtbot, tmp_path: Path,
+    ) -> None:
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        assert window.project.knowledge_base_dir is None
+        window._set_project_modified(False)
+
+        window._clear_kb_directory()
+
+        assert not window.isWindowModified()
+
+    def test_new_project_clears_kb_directory(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        # Set a KB directory first
+        kb_dir = tmp_path / "existing_kb"
+        kb_dir.mkdir()
+        window.project.knowledge_base_dir = str(kb_dir)
+        window._update_kb_indicator()
+        assert window.kb_label.text() != ""
+
+        monkeypatch.setattr(
+            "product_description_tool.main_window.QMessageBox.warning",
+            lambda *args, **kwargs: QMessageBox.StandardButton.Discard,
+        )
+
+        window.new_project()
+
+        assert window.project.knowledge_base_dir is None
+        assert window.kb_label.text() == ""
+
+    def test_kb_directory_restored_on_open_project(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        from product_description_tool.project import Project, ProjectPrompt, ProjectRepository
+
+        # Create and save a project with KB directory
+        project_repo = ProjectRepository()
+        kb_dir = tmp_path / "knowledge_base"
+        kb_dir.mkdir()
+        project = Project(
+            prompts=[ProjectPrompt(output_field="desc", prompt="Process {{@help.md}} with {{sku}}")],
+            knowledge_base_dir=str(kb_dir),
+        )
+        project_path = project_repo.save(tmp_path / "test.project.json", project)
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        monkeypatch.setattr(
+            "product_description_tool.main_window.QFileDialog.getOpenFileName",
+            lambda *args, **kwargs: (str(project_path), "Project Files (*.project.json)"),
+        )
+        monkeypatch.setattr(
+            "product_description_tool.main_window.QMessageBox.warning",
+            lambda *args, **kwargs: QMessageBox.StandardButton.Discard,
+        )
+
+        window.open_project()
+
+        # There is no actual project_path set because open_project sets self.project_path = project_path
+        # after loading. The KB directory should be restored.
+        assert window.project.knowledge_base_dir is not None
+        assert Path(window.project.knowledge_base_dir).resolve() == kb_dir.resolve()
+
+    def test_kb_directory_dirty_flag_on_set(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+        monkeypatch.setattr(
+            "product_description_tool.main_window.QFileDialog.getExistingDirectory",
+            lambda *args, **kwargs: str(kb_dir),
+        )
+
+        assert not window.isWindowModified()
+        window._set_kb_directory()
+        assert window.isWindowModified()
+
+    def test_validation_blocks_preview_when_kb_refs_exist_but_no_kb_dir(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+        _add_prompt(window, output_field="generated", prompt="Rewrite {{@help.md}} with {{sku}}")
+
+        critical_messages = []
+        original_critical = QMessageBox.critical
+
+        @staticmethod
+        def fake_critical(parent, title, text, *args, **kwargs):
+            critical_messages.append((title, text))
+            return QMessageBox.StandardButton.Ok
+
+        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+
+        # The PromptRenderer.validate_template will detect KB refs with no KB dir
+        # and raise KnowledgeBaseRefError, which _validate_ready_for_generation catches.
+        result = window._validate_ready_for_generation(window._enabled_prompts())
+
+        assert not result
+        assert len(critical_messages) == 1
+        title, text = critical_messages[0]
+        assert "Knowledge-base reference error" in title
+        assert window.document.rows[1].get("generated", "") == ""
+        assert window._worker_thread is None
+
+    def test_validation_works_with_valid_kb_dir_and_file(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+
+        # Set up KB directory with a referenced file
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+        help_file = kb_dir / "help.md"
+        help_file.write_text("Helpful content", encoding="utf-8")
+        window.project.knowledge_base_dir = str(kb_dir)
+
+        _add_prompt(window, output_field="generated", prompt="Rewrite {{@help.md}} with {{sku}}")
+
+        # Validation should pass with valid KB dir and existing file
+        result = window._validate_ready_for_generation(window._enabled_prompts())
+
+        assert result
+        assert not window._busy
+
+    def test_validation_blocks_when_kb_dir_does_not_exist(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+
+        # Set KB dir to a non-existent path
+        window.project.knowledge_base_dir = str(tmp_path / "nonexistent_kb")
+        _add_prompt(window, output_field="generated", prompt="Rewrite {{@help.md}} with {{sku}}")
+
+        critical_messages = []
+        original_critical = QMessageBox.critical
+
+        @staticmethod
+        def fake_critical(parent, title, text, *args, **kwargs):
+            critical_messages.append((title, text))
+            return QMessageBox.StandardButton.Ok
+
+        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+
+        # Validation should fail because KB dir doesn't exist
+        result = window._validate_ready_for_generation(window._enabled_prompts())
+
+        assert not result
+        assert len(critical_messages) == 1
+        title, text = critical_messages[0]
+        assert "Knowledge-base reference error" in title
+        assert window._worker_thread is None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 
@@ -26,12 +27,14 @@ class GenerationWorker(QObject):
         row_specs: list[tuple[int, dict[str, str]]],
         prompts: list[ProjectPrompt],
         config: AppConfig,
+        knowledge_base_dir: str | Path | None = None,
     ) -> None:
         super().__init__()
         self.service = service
         self.row_specs = row_specs
         self.prompts = prompts
         self.config = config
+        self.knowledge_base_dir = knowledge_base_dir
         self._cancel_requested = threading.Event()
 
     def cancel(self) -> None:
@@ -59,6 +62,7 @@ class GenerationWorker(QObject):
                         row=row,
                         template=prompt.prompt,
                         config=self.config,
+                        knowledge_base_dir=self.knowledge_base_dir,
                         on_prompt_ready=(
                             lambda current_row_index, prompt_payload, current_prompt=prompt: (
                                 self._emit_prompt_started(

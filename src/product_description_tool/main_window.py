@@ -39,7 +39,12 @@ from product_description_tool.filter_proxy import WildcardFilterProxyModel
 from product_description_tool.generation import GenerationService
 from product_description_tool.preview import HtmlPreview, analyze_html_content, format_html_stats
 from product_description_tool.project import Project, ProjectPrompt, ProjectRepository
-from product_description_tool.prompt_renderer import CycleError, PromptRenderer, PromptTemplateError
+from product_description_tool.prompt_renderer import (
+    CycleError,
+    KnowledgeBaseRefError,
+    PromptRenderer,
+    PromptTemplateError,
+)
 from product_description_tool.table_model import CsvTableModel
 from product_description_tool.worker import GenerationWorker
 
@@ -74,6 +79,7 @@ class MainWindow(QMainWindow):
         self._busy = False
         self._project_modified = False
         self.filter_patterns: dict[str, str] = {}
+        self._updating_prompt_ui = False
 
         self.table_model = CsvTableModel()
         self.proxy_model = WildcardFilterProxyModel()
@@ -192,6 +198,10 @@ class MainWindow(QMainWindow):
         process_row.addWidget(self.process_menu_button)
         prompt_layout.addLayout(process_row)
 
+        self.kb_label = QLabel("")
+        self.kb_label.setStyleSheet("color: gray; font-size: 11px;")
+        prompt_layout.addWidget(self.kb_label)
+
         description_layout = QVBoxLayout(self.description_panel.content)
         description_layout.setContentsMargins(0, 0, 0, 0)
         description_layout.setSpacing(8)
@@ -293,6 +303,14 @@ class MainWindow(QMainWindow):
             lambda checked=False: self.edit_selected_description(self.right_field_combo.currentText())
         )
         edit_menu.addActions([self.settings_action, self.edit_original_action, self.edit_result_action])
+        edit_menu.addSeparator()
+
+        kb_menu = edit_menu.addMenu("Knowledge Base")
+        self.set_kb_directory_action = QAction("Set Directory...", self)
+        self.set_kb_directory_action.triggered.connect(self._set_kb_directory)
+        self.clear_kb_directory_action = QAction("Clear Directory", self)
+        self.clear_kb_directory_action.triggered.connect(self._clear_kb_directory)
+        kb_menu.addActions([self.set_kb_directory_action, self.clear_kb_directory_action])
 
         process_menu = menu_bar.addMenu("Process")
         self.process_all_action = QAction("All CSV Rows", self)
@@ -324,6 +342,7 @@ class MainWindow(QMainWindow):
         self._update_preview_field_selectors(preserve_selection=False)
         self._update_interactive_state()
         self._set_project_modified(False)
+        self._update_kb_indicator()
         self.status.showMessage("New project")
 
     def open_project(self) -> None:
@@ -359,6 +378,7 @@ class MainWindow(QMainWindow):
         self._update_preview_field_selectors(preserve_selection=False)
         self._update_interactive_state()
         self._set_project_modified(False)
+        self._update_kb_indicator()
         self.status.showMessage(f"Opened project {self.project_path}")
 
     def save_project(self, save_as: bool = False) -> bool:
@@ -484,6 +504,35 @@ class MainWindow(QMainWindow):
             else:
                 self._refresh_current_selection()
             self._set_project_modified(True)
+
+    def _set_kb_directory(self) -> None:
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Knowledge Base Directory",
+            self.project.knowledge_base_dir or "",
+        )
+        if not directory:
+            return
+        self.project.knowledge_base_dir = directory
+        self._set_project_modified(True)
+        self._update_kb_indicator()
+        self.status.showMessage(f"Knowledge base set to {directory}")
+
+    def _clear_kb_directory(self) -> None:
+        if self.project.knowledge_base_dir is None:
+            return
+        self.project.knowledge_base_dir = None
+        self._set_project_modified(True)
+        self._update_kb_indicator()
+        self.status.showMessage("Knowledge base directory cleared")
+
+    def _update_kb_indicator(self) -> None:
+        if self.project.knowledge_base_dir:
+            self.kb_label.setText(f"KB: {self.project.knowledge_base_dir}")
+            self.kb_label.setToolTip(self.project.knowledge_base_dir)
+        else:
+            self.kb_label.setText("")
+            self.kb_label.setToolTip("")
 
     def add_prompt(self) -> None:
         output_field, accepted = QInputDialog.getText(
@@ -651,7 +700,11 @@ class MainWindow(QMainWindow):
             return False
         for prompt in prompts:
             try:
-                self.generation_service.validate_template(prompt.prompt, self.document.headers)
+                self.generation_service.validate_template(
+                    prompt.prompt,
+                    self.document.headers,
+                    knowledge_base_dir=self.project.knowledge_base_dir,
+                )
             except PromptTemplateError as exc:
                 QMessageBox.critical(
                     self,
@@ -662,6 +715,13 @@ class MainWindow(QMainWindow):
                             *exc.missing_fields,
                         ]
                     ),
+                )
+                return False
+            except KnowledgeBaseRefError as exc:
+                QMessageBox.critical(
+                    self,
+                    "Knowledge-base reference error",
+                    f"Prompt '{prompt.output_field}':\n{exc}",
                 )
                 return False
         # Check for cyclic dependencies among prompts
@@ -715,6 +775,7 @@ class MainWindow(QMainWindow):
             row_specs=row_specs,
             prompts=prompts,
             config=dialog_config,
+            knowledge_base_dir=self.project.knowledge_base_dir,
         )
         thread = QThread(self)
         self._worker = worker
@@ -748,7 +809,11 @@ class MainWindow(QMainWindow):
         prepare_prompt = getattr(self.generation_service, "prepare_prompt", None)
         if prepare_prompt is None:
             prepare_prompt = GenerationService().prepare_prompt
-        first_prompt = prepare_prompt(template=prompts[0].prompt, row=row_specs[0][1])
+        first_prompt = prepare_prompt(
+            template=prompts[0].prompt,
+            row=row_specs[0][1],
+            knowledge_base_dir=self.project.knowledge_base_dir,
+        )
         return (len(prompts) * len(row_specs), first_prompt.input_char_count)
 
     def _handle_prompt_started(self, row_index: int, output_field: str, input_chars: int) -> None:
@@ -910,6 +975,8 @@ class MainWindow(QMainWindow):
             self.settings_action,
             self.edit_original_action,
             self.edit_result_action,
+            self.set_kb_directory_action,
+            self.clear_kb_directory_action,
         ]:
             action.setEnabled(not busy)
         processing_actions_enabled = not busy and self._worker_thread is None
@@ -941,6 +1008,9 @@ class MainWindow(QMainWindow):
         self.right_field_combo.setEnabled(not self._busy and has_right_field)
         self.edit_original_button.setEnabled(not self._busy and has_left_field)
         self.edit_result_button.setEnabled(not self._busy and has_right_field)
+        kb_actions_enabled = not self._busy
+        self.set_kb_directory_action.setEnabled(kb_actions_enabled)
+        self.clear_kb_directory_action.setEnabled(kb_actions_enabled)
 
     def on_selection_changed(self) -> None:
         self._refresh_current_selection()

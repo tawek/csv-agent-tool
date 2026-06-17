@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +43,7 @@ class ProjectPrompt:
 class Project:
     prompts: list[ProjectPrompt] = field(default_factory=list)
     csv: CsvConfig = field(default_factory=CsvConfig)
+    knowledge_base_dir: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Project":
@@ -54,13 +56,17 @@ class Project:
                 if prompt.output_field
             ],
             csv=CsvConfig.from_dict(data.get("csv", {})),
+            knowledge_base_dir=data.get("knowledge-base-dir"),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "prompts": [prompt.to_dict() for prompt in self.prompts],
             "csv": self.csv.to_dict(),
         }
+        if self.knowledge_base_dir is not None:
+            result["knowledge-base-dir"] = self.knowledge_base_dir
+        return result
 
 
 def normalize_project_path(path: str | Path) -> Path:
@@ -76,6 +82,26 @@ def project_csv_path(path: str | Path) -> Path:
     return project_path.with_name(f"{base_name}.csv")
 
 
+def _make_kb_relative(kb_directory: str, project_dir: Path) -> str:
+    """Convert a KB directory path to relative form if under *project_dir*.
+
+    If *kb_directory* is already relative it is returned unchanged.
+    If it is absolute and under *project_dir* a relative form is returned.
+    Otherwise the absolute path is returned as-is.
+    """
+    kb_path = Path(kb_directory)
+    if not kb_path.is_absolute():
+        return kb_directory  # already relative
+    try:
+        rel = os.path.relpath(kb_path, project_dir)
+        # Only store as relative if it doesn't escape the project directory
+        if not rel.startswith(".."):
+            return rel
+    except ValueError:
+        pass
+    return str(kb_path)
+
+
 def _prompt_filename(output_field: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", output_field).strip("._") or "prompt"
     return f"{sanitized}.prompt.txt"
@@ -86,6 +112,12 @@ class ProjectRepository:
         project_path = normalize_project_path(path)
         data = json.loads(project_path.read_text(encoding="utf-8"))
         project = Project.from_dict(data)
+        # Resolve KB directory relative to the project file location
+        if project.knowledge_base_dir is not None:
+            kb_path = Path(project.knowledge_base_dir)
+            if not kb_path.is_absolute():
+                kb_path = (project_path.parent / kb_path).resolve()
+            project.knowledge_base_dir = str(kb_path)
         for prompt in project.prompts:
             if not prompt.prompt_file:
                 continue
@@ -100,8 +132,14 @@ class ProjectRepository:
         for prompt in project.prompts:
             prompt.prompt_file = prompt.prompt_file or _prompt_filename(prompt.output_field)
             (project_path.parent / prompt.prompt_file).write_text(prompt.prompt, encoding="utf-8")
+        # Serialize project with KB directory as relative path when possible
+        data = project.to_dict()
+        if project.knowledge_base_dir is not None:
+            data["knowledge-base-dir"] = _make_kb_relative(
+                project.knowledge_base_dir, project_path.parent
+            )
         project_path.write_text(
-            json.dumps(project.to_dict(), indent=2, ensure_ascii=True),
+            json.dumps(data, indent=2, ensure_ascii=True),
             encoding="utf-8",
         )
         return project_path

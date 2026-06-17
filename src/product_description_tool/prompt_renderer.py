@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import re
 from collections import deque
+from pathlib import Path
 from typing import Sequence
 
 PLACEHOLDER_PATTERN = re.compile(r"{{\s*(.+?)\s*}}")
+
+KB_REF_PREFIX = "@"
+SUPPORTED_KB_EXTENSIONS = {".md", ".markdown", ".csv"}
 
 
 class CycleError(Exception):
@@ -27,6 +31,14 @@ class PromptTemplateError(ValueError):
         self.missing_fields = sorted(missing_fields)
 
 
+class KnowledgeBaseRefError(ValueError):
+    """Raised when knowledge-base references cannot be resolved."""
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = errors
+        message = "Knowledge-base reference errors:\n" + "\n".join(f"  - {e}" for e in errors)
+        super().__init__(message)
+
+
 class PromptRenderer:
     @staticmethod
     def extract_placeholders(template: str) -> list[str]:
@@ -39,27 +51,125 @@ class PromptRenderer:
                 seen.add(name)
         return placeholders
 
-    def validate(self, template: str, available_fields: list[str]) -> None:
+    @staticmethod
+    def extract_kb_references(template: str) -> list[str]:
+        """Extract knowledge-base file references (``{{@...}}``) from the template.
+
+        Returns the file paths (without the ``@`` prefix) in order of appearance.
+        """
+        refs: list[str] = []
+        seen: set[str] = set()
+        for match in PLACEHOLDER_PATTERN.finditer(template):
+            name = match.group(1)
+            if name.startswith("@") and name not in seen:
+                refs.append(name[1:])
+                seen.add(name)
+        return refs
+
+    @staticmethod
+    def is_kb_placeholder(name: str) -> bool:
+        return name.startswith(KB_REF_PREFIX)
+
+    @staticmethod
+    def extract_kb_placeholders(template: str) -> list[str]:
+        return [ph for ph in PromptRenderer.extract_placeholders(template) if ph.startswith(KB_REF_PREFIX)]
+
+    @staticmethod
+    def extract_field_placeholders(template: str) -> list[str]:
+        return [ph for ph in PromptRenderer.extract_placeholders(template) if not ph.startswith(KB_REF_PREFIX)]
+
+    def validate(self, template: str, available_fields: list[str], knowledge_base_dir: str | Path | None = None) -> None:
+        all_placeholders = self.extract_placeholders(template)
+        field_phs = [ph for ph in all_placeholders if not ph.startswith(KB_REF_PREFIX)]
+        kb_phs = [ph for ph in all_placeholders if ph.startswith(KB_REF_PREFIX)]
+
+        # Validate field placeholders
         available = set(available_fields)
-        missing = [
-            placeholder
-            for placeholder in self.extract_placeholders(template)
-            if placeholder not in available
-        ]
+        missing = [ph for ph in field_phs if ph not in available]
         if missing:
             raise PromptTemplateError(missing)
 
-    def render(self, template: str, row: dict[str, str]) -> str:
-        self.validate(template, list(row.keys()))
+        # Validate KB refs
+        if kb_phs:
+            self._validate_kb_refs(kb_phs, knowledge_base_dir)
+
+    @staticmethod
+    def _validate_kb_refs(refs: list[str], kb_dir: str | Path | None) -> None:
+        errors: list[str] = []
+        if kb_dir is None:
+            errors.append("No knowledge-base directory configured")
+            raise KnowledgeBaseRefError(errors)
+
+        kb_path = Path(kb_dir).resolve()
+        for ref in refs:
+            ref_path_str = ref[len(KB_REF_PREFIX):]  # strip @ prefix
+            placeholder = f"{{@{ref_path_str}}}"
+
+            # Check for path traversal (must not escape KB directory)
+            candidate = (kb_path / ref_path_str).resolve()
+            try:
+                candidate.relative_to(kb_path)
+            except ValueError:
+                errors.append(f"{placeholder}: path escapes knowledge-base directory")
+                continue
+
+            # Check file exists
+            if not candidate.exists():
+                errors.append(f"{placeholder}: file not found")
+                continue
+
+            # Check it is a file (not a directory)
+            if not candidate.is_file():
+                errors.append(f"{placeholder}: not a file")
+                continue
+
+            # Check supported extension
+            if candidate.suffix.lower() not in SUPPORTED_KB_EXTENSIONS:
+                supported = ", ".join(sorted(SUPPORTED_KB_EXTENSIONS))
+                errors.append(
+                    f"{placeholder}: unsupported file type '{candidate.suffix}' "
+                    f"(supported: {supported})"
+                )
+                continue
+
+            # Check readable
+            try:
+                candidate.read_bytes()
+            except (OSError, PermissionError):
+                errors.append(f"{placeholder}: file is not readable")
+                continue
+
+        if errors:
+            raise KnowledgeBaseRefError(errors)
+
+    def render(self, template: str, row: dict[str, str], knowledge_base_dir: str | Path | None = None) -> str:
+        self.validate(template, list(row.keys()), knowledge_base_dir)
+
+        kb_path: Path | None = None
+        if knowledge_base_dir is not None:
+            kb_path = Path(knowledge_base_dir).resolve()
 
         def replace(match: re.Match[str]) -> str:
-            return row.get(match.group(1), "")
+            name = match.group(1)
+            if name.startswith(KB_REF_PREFIX):
+                if kb_path is None:
+                    return ""
+                ref_path = name[len(KB_REF_PREFIX):]
+                resolved = (kb_path / ref_path).resolve()
+                try:
+                    return resolved.read_text(encoding="utf-8")
+                except (OSError, PermissionError):
+                    return ""
+            return row.get(name, "")
 
         return PLACEHOLDER_PATTERN.sub(replace, template)
 
     @staticmethod
     def compute_prompt_order(prompts: Sequence["ProjectPrompt"]) -> list["ProjectPrompt"]:
         """Return prompts in topological order based on output-field dependencies.
+
+        Knowledge-base file references (``{{@...}}``) are excluded from the
+        dependency graph and never create dependency edges.
 
         Raises ``CycleError`` when a cycle is detected, carrying the prompts
         involved in the cycle and the dependency edges that form it.
@@ -81,6 +191,9 @@ class PromptRenderer:
             placeholders = PromptRenderer.extract_placeholders(p.prompt)
             dep_set: set[str] = set()
             for ph in placeholders:
+                # KB refs do not create prompt dependencies
+                if ph.startswith(KB_REF_PREFIX):
+                    continue
                 if ph in prompt_map and ph != name:
                     dep_set.add(ph)
                     edges.append((name, ph))

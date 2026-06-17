@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from product_description_tool.config import AppConfig
@@ -57,12 +58,12 @@ class GenerationService:
         with self._active_provider_lock:
             self._active_provider = provider
 
-    def validate_template(self, template: str, headers: list[str]) -> None:
-        self.prompt_renderer.validate(template, headers)
+    def validate_template(self, template: str, headers: list[str], knowledge_base_dir: str | Path | None = None) -> None:
+        self.prompt_renderer.validate(template, headers, knowledge_base_dir)
 
-    def prepare_prompt(self, *, template: str, row: dict[str, str]) -> PromptPayload:
+    def prepare_prompt(self, *, template: str, row: dict[str, str], knowledge_base_dir: str | Path | None = None) -> PromptPayload:
         return PromptPayload(
-            system_prompt=self.prompt_renderer.render(template, row),
+            system_prompt=self.prompt_renderer.render(template, row, knowledge_base_dir),
             user_prompt=USER_PROMPT,
         )
 
@@ -73,6 +74,7 @@ class GenerationService:
         row: dict[str, str],
         template: str,
         config: AppConfig,
+        knowledge_base_dir: str | Path | None = None,
         on_prompt_ready: Callable[[int, PromptPayload], None] | None = None,
         on_chunk: Callable[[int, str], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
@@ -80,7 +82,7 @@ class GenerationService:
         provider = self.provider_factory(config)
         self._set_active_provider(provider)
         try:
-            prompt = self.prepare_prompt(template=template, row=row)
+            prompt = self.prepare_prompt(template=template, row=row, knowledge_base_dir=knowledge_base_dir)
             if on_prompt_ready is not None:
                 on_prompt_ready(row_index, prompt)
             content = provider.generate(
@@ -102,6 +104,7 @@ class GenerationService:
         rows: list[dict[str, str]],
         template: str,
         config: AppConfig,
+        knowledge_base_dir: str | Path | None = None,
         on_result: Callable[[GenerationResult], None] | None = None,
         on_prompt_ready: Callable[[int, PromptPayload], None] | None = None,
         on_chunk: Callable[[int, str], None] | None = None,
@@ -114,7 +117,7 @@ class GenerationService:
             for row_index, row in enumerate(rows):
                 if should_cancel is not None and should_cancel():
                     break
-                prompt = self.prepare_prompt(template=template, row=row)
+                prompt = self.prepare_prompt(template=template, row=row, knowledge_base_dir=knowledge_base_dir)
                 if on_prompt_ready is not None:
                     on_prompt_ready(row_index, prompt)
                 result = GenerationResult(

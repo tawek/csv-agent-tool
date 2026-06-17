@@ -1,6 +1,13 @@
 import pytest
+from pathlib import Path
 
-from product_description_tool.prompt_renderer import CycleError, PromptRenderer, PromptTemplateError
+from product_description_tool.prompt_renderer import (
+    CycleError,
+    KnowledgeBaseRefError,
+    PromptRenderer,
+    PromptTemplateError,
+    SUPPORTED_KB_EXTENSIONS,
+)
 from product_description_tool.project import ProjectPrompt
 
 
@@ -112,3 +119,156 @@ class TestComputePromptOrder:
         assert "z" in exc_info.value.cycle_prompts
         msg = str(exc_info.value)
         assert "Cyclic dependency detected" in msg
+
+    def test_kb_refs_ignored_in_dependency_graph(self) -> None:
+        """KB refs ({{@...}}) must not create prompt dependencies."""
+        prompts = [
+            ProjectPrompt(output_field="a", prompt="Use {{b}} and {{@kb/doc.md}}"),
+            ProjectPrompt(output_field="b", prompt="Plain {{sku}}"),
+        ]
+        ordered = PromptRenderer.compute_prompt_order(prompts)
+        assert ordered[0].output_field == "b"
+        assert ordered[1].output_field == "a"
+
+
+class TestKnowledgeBaseRefs:
+    def test_is_kb_placeholder(self) -> None:
+        assert PromptRenderer.is_kb_placeholder("@docs/help.md") is True
+        assert PromptRenderer.is_kb_placeholder("column_name") is False
+
+    def test_extract_kb_placeholders(self) -> None:
+        result = PromptRenderer.extract_kb_placeholders(
+            "Use {{@doc.md}} and {{@sub/other.csv}} with {{title}}"
+        )
+        assert result == ["@doc.md", "@sub/other.csv"]
+
+    def test_extract_kb_references(self) -> None:
+        """extract_kb_references returns paths without the @ prefix."""
+        result = PromptRenderer.extract_kb_references(
+            "Use {{@doc.md}} and {{@sub/other.csv}} with {{title}}"
+        )
+        assert result == ["doc.md", "sub/other.csv"]
+
+    def test_extract_field_placeholders(self) -> None:
+        result = PromptRenderer.extract_field_placeholders(
+            "Use {{@doc.md}} and {{@sub/other.csv}} with {{title}}"
+        )
+        assert result == ["title"]
+
+    def test_validate_with_kb_refs_succeeds(self, tmp_path: Path) -> None:
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+        (kb_dir / "help.md").write_text("# Help", encoding="utf-8")
+        (kb_dir / "data.csv").write_text("a,b\n1,2", encoding="utf-8")
+
+        renderer = PromptRenderer()
+        # Should not raise
+        renderer.validate(
+            "Use {{@help.md}} and {{@data.csv}} with {{title}}",
+            ["title"],
+            knowledge_base_dir=str(kb_dir),
+        )
+
+    def test_validate_raises_when_kb_dir_missing(self) -> None:
+        renderer = PromptRenderer()
+        with pytest.raises(KnowledgeBaseRefError) as exc_info:
+            renderer.validate("Use {{@doc.md}}", ["title"])
+        errors = exc_info.value.errors
+        assert any("No knowledge-base directory configured" in e for e in errors)
+
+    def test_validate_raises_for_file_not_found(self, tmp_path: Path) -> None:
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+
+        renderer = PromptRenderer()
+        with pytest.raises(KnowledgeBaseRefError) as exc_info:
+            renderer.validate(
+                "Use {{@missing.md}}",
+                ["title"],
+                knowledge_base_dir=str(kb_dir),
+            )
+        errors = exc_info.value.errors
+        assert any("file not found" in e for e in errors)
+
+    def test_validate_raises_for_unsupported_extension(self, tmp_path: Path) -> None:
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+        (kb_dir / "notes.txt").write_text("hello", encoding="utf-8")
+
+        renderer = PromptRenderer()
+        with pytest.raises(KnowledgeBaseRefError) as exc_info:
+            renderer.validate(
+                "Use {{@notes.txt}}",
+                ["title"],
+                knowledge_base_dir=str(kb_dir),
+            )
+        errors = exc_info.value.errors
+        assert any("unsupported" in e.lower() for e in errors)
+
+    def test_validate_raises_for_path_escaping_kb_dir(self, tmp_path: Path) -> None:
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+        # Create a file outside the KB dir
+        outside = tmp_path / "secret.md"
+        outside.write_text("secret", encoding="utf-8")
+
+        renderer = PromptRenderer()
+        with pytest.raises(KnowledgeBaseRefError) as exc_info:
+            renderer.validate(
+                "Use {{@../secret.md}}",
+                ["title"],
+                knowledge_base_dir=str(kb_dir),
+            )
+        errors = exc_info.value.errors
+        assert any("escapes" in e.lower() for e in errors)
+
+    def test_validate_mixed_field_and_kb_refs(self, tmp_path: Path) -> None:
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+        (kb_dir / "style.md").write_text("CSS", encoding="utf-8")
+
+        renderer = PromptRenderer()
+        # Should raise for unknown field placeholder, not KB ref
+        with pytest.raises(PromptTemplateError) as exc_info:
+            renderer.validate(
+                "{{@style.md}} and {{missing}}",
+                ["title"],
+                knowledge_base_dir=str(kb_dir),
+            )
+        assert exc_info.value.missing_fields == ["missing"]
+
+    def test_render_substitutes_kb_refs(self, tmp_path: Path) -> None:
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+        (kb_dir / "style.md").write_text("Bold text", encoding="utf-8")
+
+        renderer = PromptRenderer()
+        result = renderer.render(
+            "Style: {{@style.md}} and title: {{title}}",
+            {"title": "Product"},
+            knowledge_base_dir=str(kb_dir),
+        )
+        assert "Bold text" in result
+        assert "Product" in result
+
+    def test_render_multiple_kb_refs(self, tmp_path: Path) -> None:
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+        (kb_dir / "a.md").write_text("Alpha", encoding="utf-8")
+        (kb_dir / "sub").mkdir()
+        (kb_dir / "sub" / "b.csv").write_text("Beta", encoding="utf-8")
+
+        renderer = PromptRenderer()
+        result = renderer.render(
+            "{{@a.md}} and {{@sub/b.csv}}",
+            {},
+            knowledge_base_dir=str(kb_dir),
+        )
+        assert "Alpha" in result
+        assert "Beta" in result
+
+    def test_render_preserves_field_placeholders_without_kb(self) -> None:
+        """When no KB dir is given, field placeholders still work."""
+        renderer = PromptRenderer()
+        result = renderer.render("Hello {{name}}", {"name": "World"})
+        assert result == "Hello World"
