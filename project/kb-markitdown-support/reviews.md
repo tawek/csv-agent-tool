@@ -85,3 +85,30 @@ The hang appears to be a pytest-qt interaction with monkeypatch on the specific 
 - `markitdown` is a standard `pyproject.toml` dependency — no special packaging adjustments needed.
 - The existing `packaging/product_description_tool.spec` does not require changes for the library-first integration path.
 - No CLI fallback code was necessary; direct library integration is sufficient.
+
+## 2026-06-17 — Packaging follow-up architectural review
+
+Reviewed artifacts:
+
+- `project/kb-markitdown-support/implementation-notes.md`
+- `project/kb-markitdown-support/status.md`
+- `docs/specification.md`
+- `pyproject.toml`
+- `packaging/product_description_tool.spec`
+- `tests/test_packaging.py`
+- `src/product_description_tool/kb_conversion.py`
+
+Summary:
+
+- The dependency change in `pyproject.toml` correctly upgrades the runtime contract from "MarkItDown importable" to "PDF and selected Office converters installed", which matches the packaging follow-up goal and the spec's packaged-build promise for PDF conversion.
+- The PyInstaller spec change is sufficient and appropriately conservative: `collect_submodules("markitdown")` covers MarkItDown's dynamically registered converter modules, and `collect_data_files("magika")` covers the model assets MarkItDown instantiates at runtime.
+- The spec change is not perfectly minimal: the selected extras include `outlook`, but the app does not currently advertise or route `.msg` files through KB support; meanwhile `kb_conversion.py` still lists `.doc` and `.ppt` as convertible even though the installed MarkItDown converters in 0.1.6 are for `.docx` and `.pptx` only.
+
+Decision:
+
+- **Architect review gate passes with one non-blocking contract-alignment follow-up to track.**
+
+Findings:
+
+1. **Non-blocking:** `pyproject.toml` installs the `outlook` extra, but `src/product_description_tool/kb_conversion.py` does not expose `.msg` as a supported KB extension, so the packaged dependency set is slightly broader than the current UI/runtime contract.
+2. **Non-blocking:** `src/product_description_tool/kb_conversion.py` still advertises `.doc` and `.ppt` as convertible extensions, but MarkItDown 0.1.6's built-in converters accept `.docx` and `.pptx` only. This is a pre-existing support-contract mismatch rather than a packaging regression, but it remains worth correcting in a later follow-up.

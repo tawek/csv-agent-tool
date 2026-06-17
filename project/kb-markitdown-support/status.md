@@ -1,11 +1,11 @@
 # Status
 
-- Phase: implementation complete — source changes merged and validated
-- Active step: validation
+- Phase: packaging follow-up complete
+- Active step: none
 - Blockers: none
 - Next actions:
-  - require post-implementation architect review because the change spans multiple source modules and follows a spec update
   - resolve `test_view_converted_file_handles_markitdown_unavailable` test hang under pytest-qt (see reviews.md for details)
+  - align the KB-supported extension contract with the shipped MarkItDown capability (`.doc` / `.ppt` vs `.docx` / `.pptx`) in a separate follow-up
 
 ## Validation Results (2026-06-17)
 
@@ -17,6 +17,18 @@ All source modules implementing the MarkItDown-backed KB extension are present, 
 - `kb_window.py` — `_view_converted_file()` read-only Markdown viewer, button-label toggling, conversion error handling
 - `main_window.py` — imports `ALL_KB_EXTENSIONS`, uses it for KB file gathering
 - `pyproject.toml` — `markitdown>=0.1.6` listed as normal dependency
+
+## Packaging follow-up (2026-06-17)
+
+- Confirmed issue: current environment does not have `pdfplumber` installed, so PDF conversion is not actually available with the plain `markitdown` dependency.
+- Planned fix:
+  - change the dependency to the shippable local extra set: `markitdown[docx,outlook,pdf,pptx,xls,xlsx]>=0.1.6`
+  - update `packaging/product_description_tool.spec` to bundle MarkItDown submodules and `magika` data files required at runtime
+- Result:
+  - `uv lock` and `uv sync --extra dev` now install `pdfplumber` / `pdfminer-six` along with the selected Office-related conversion extras.
+  - `./scripts/pytest.sh tests/test_packaging.py tests/test_kb_conversion.py` passed.
+  - `uv run pyinstaller packaging/product_description_tool.spec` completed successfully.
+  - The architect review gate passed with non-blocking follow-ups recorded in `action-register.md`.
 
 ### Test results
 

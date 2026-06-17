@@ -3,9 +3,10 @@
 from pathlib import Path
 import re
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
-hiddenimports = []
+hiddenimports = collect_submodules("markitdown")
+datas = collect_data_files("markitdown") + collect_data_files("magika")
 excludes = [
     "PySide6.QtWebEngineWidgets",
     "PySide6.QtWebEngineCore",
@@ -44,7 +45,7 @@ a = Analysis(
     [str(project_root / "src/product_description_tool/__main__.py")],
     pathex=[str(project_root / "src")],
     binaries=[],
-    datas=[],
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

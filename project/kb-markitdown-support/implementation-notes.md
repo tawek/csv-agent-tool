@@ -23,3 +23,10 @@
 - Whether the MarkItDown package exposes a stable enough Python API for the needed conversions in this app.
 - What file types it supports well enough for KB viewing, embedding, and attachments.
 - Whether any technically required CLI fallback should be hidden entirely behind an internal Python service boundary.
+
+## Packaging follow-up (2026-06-17)
+
+- User requested verification that PDF conversion really works in the dev environment and in packaged builds.
+- Current state before this follow-up: the project depends on plain `markitdown`, which leaves optional converters like PDF support unavailable unless extras were installed manually.
+- Required change: depend on the full local converter extra set the app can actually ship (`docx`, `outlook`, `pdf`, `pptx`, `xls`, `xlsx`) so the app and build environment install the optional converter stack without the unsatisfied cloud-preview extras pulled by `markitdown[all]`.
+- Required change: ensure the PyInstaller spec explicitly carries MarkItDown runtime pieces needed by packaged builds, including MarkItDown submodules and `magika` model data.
