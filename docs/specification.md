@@ -10,7 +10,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Actor:** User (first-time setup)
 
-**Description:** The user configures the LLM provider, generation parameters, and CSV import/export settings.
+**Description:** The user configures the LLM provider, generation parameters, and project CSV export settings. CSV import settings are primarily established by import auto-detection rather than by making the user pre-configure them.
 
 **Trigger:** User selects **File > Settings** (or clicks the Settings action).
 
@@ -25,10 +25,12 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
    - **OpenAI-compatible:** Base URL, API key, model name, and arbitrary options JSON.
 4. The user can refresh the model list from the active provider endpoint via a refresh button.
 5. The user sets generation parameters: temperature (0.0-2.0), top-p (0.0-1.0), max output tokens (1-200000).
-6. The user configures CSV I/O: delimiter (`;` by default), quote char, encoding, newline character, whether to write headers, and the default state of the "export only visible rows" checkbox (a boolean option). When a saved app or project CSV config omits either `delimiter` or `export_only_visible`, the application falls back to the same defaults used for a fresh `CsvConfig` (`;` and `True`, respectively).
-7. The user manages per-column visibility, display labels, whitespace-stripping flags, and CSV export column order through the editable fields configuration in the **CSV** tab.
-8. The user may reset the fields configuration to match the currently loaded CSV headers. Resetting restores the current document header order as the export column order and recreates field entries for all current headers.
-9. The user confirms or cancels. On confirm, the provider config and generation config are saved to the persistent `ConfigStore` (JSON on disk). The project-scoped `CsvConfig` is applied to the working document and table model, including the configured export column order.
+6. The user configures CSV export behavior: delimiter (`;` by default), quote char, encoding, newline character, whether to write headers, and the default state of the "export only visible rows" checkbox (a boolean option). When a saved app or project CSV config omits either `delimiter` or `export_only_visible`, the application falls back to the same defaults used for a fresh `CsvConfig` (`;` and `True`, respectively).
+7. The CSV settings shown in project settings are the project's export settings. They control later project save/export writes and do not prevent import auto-detection from choosing different parsing settings for opened/imported CSV files.
+8. Import heuristics are limited to low-level parsing characteristics (`encoding`, `delimiter`, `quotechar`, `newline`). They must not guess prompt mappings, source columns, output columns, field visibility, field labels, export order, or any other prompt/project semantics.
+9. The user manages per-column visibility, display labels, whitespace-stripping flags, and CSV export column order through the editable fields configuration in the **CSV** tab.
+10. The user may reset the fields configuration to match the currently loaded CSV headers. Resetting restores the current document header order as the export column order and recreates field entries for all current headers.
+11. The user confirms or cancels. On confirm, the provider config and generation config are saved to the persistent `ConfigStore` (JSON on disk). The project-scoped export `CsvConfig` is applied to the working document and table model, including the configured export column order.
 
 **Postconditions:** The updated configuration is persisted and immediately applied to the working session.
 
@@ -47,7 +49,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 **Flow:**
 
 1. The application checks whether the current project has unsaved changes (`_project_modified`). If dirty, the user is prompted to save.
-2. On dismissal of the save prompt or after saving, a new `Project` is created with an empty `CsvConfig` derived from the current app config defaults.
+2. On dismissal of the save prompt or after saving, a new `Project` is created with a CSV configuration baseline derived from the current app config defaults. Import settings are not yet established from file content, and export settings are not yet established unless the user explicitly configures them in project settings.
 3. The in-memory `CsvDocument` is reset to empty headers and rows.
 4. The project path, external CSV path, project-scoped knowledge-base directory, prompt-attachment metadata, and all filters are cleared.
 5. The UI is refreshed: prompt controls, the reusable prompt editor, prompt-attachment management state, table view, preview selectors, and knowledge-base management state are reset.
@@ -71,7 +73,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 3. The user selects a `.project.json` file.
 4. The `ProjectRepository` loads the project definition, including all `ProjectPrompt` objects, each prompt's attachment metadata, and the project's configured knowledge-base directory.
 5. For each prompt with a `prompt_file` sidecar, the prompt text is read from the sibling `.prompt.txt` file.
-6. The repository resolves the sibling CSV path (e.g., `catalog.project.json` maps to `catalog.csv`). If the sibling CSV exists, it is loaded using the project's `CsvConfig`. Otherwise, an empty `CsvDocument` is constructed from the project's field keys and prompt output fields.
+6. The repository resolves the sibling CSV path (e.g., `catalog.project.json` maps to `catalog.csv`). If the sibling CSV exists, it is loaded using the project's persisted CSV import settings. Otherwise, an empty `CsvDocument` is constructed from the project's field keys and prompt output fields.
 7. The current project, document, and paths are set. Any configured knowledge-base directory becomes the active project-scoped knowledge-base root. Filters are cleared.
 8. Prompt controls, the reusable prompt editor, prompt-attachment management state, table view, preview selectors, and knowledge-base management state are refreshed.
 
@@ -91,8 +93,8 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 1. For **Save As**, a file dialog prompts for a destination path. The path is normalized to end in `.project.json`.
 2. The `ProjectRepository.save()` method writes each prompt's text to a sidecar `.prompt.txt` file in the same directory.
-3. The project metadata (prompts, enabled states, prompt-to-output-column mapping, per-prompt attachment metadata, project-scoped knowledge-base directory, CSV config, and field metadata including labels, visibility, whitespace-stripping flags, and export column order) is written to `*.project.json`.
-4. The working `CsvDocument` is written to the sibling `*.csv` file using the project's `CsvConfig`.
+3. The project metadata (prompts, enabled states, prompt-to-output-column mapping, per-prompt attachment metadata, project-scoped knowledge-base directory, CSV import settings, CSV export settings, and field metadata including labels, visibility, whitespace-stripping flags, and export column order) is written to `*.project.json`.
+4. The working `CsvDocument` is written to the sibling `*.csv` file using the project's export CSV settings.
 5. The `project_path` is updated, and the dirty flag is cleared.
 
 **Postconditions:** The `*.project.json`, sibling `*.csv`, and all `.prompt.txt` sidecar files exist on disk with the latest state.
@@ -101,7 +103,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Actor:** User
 
-**Description:** The user loads an arbitrary CSV file into the current session without creating a project association.
+**Description:** The user loads an arbitrary CSV file into the current session. The application auto-detects import parsing settings so the normal import path does not require the user to figure out the correct setup first.
 
 **Trigger:** User selects **CSV > Import**.
 
@@ -110,19 +112,37 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 **Flow:**
 
 1. A file dialog opens. The user selects a `.csv` file.
-2. The `CsvRepository.load()` method reads the file using the current `CsvConfig` (encoding, delimiter, quote char).
-3. The `CsvDocument` is replaced with the imported headers and rows. The `source_path` and detected `dialect` are recorded.
-4. The table view, preview selectors, and prompt controls are refreshed to match the new columns.
-5. The dirty flag is set because the imported data is not yet part of a saved project.
-6. `current_external_csv_path` is updated to the imported file's path.
+2. Before reading rows, the application auto-detects effective CSV import parsing settings for `encoding`, `delimiter`, `quotechar`, and `newline` from the selected file. If a heuristic cannot determine a usable value, the application falls back to the application's CSV defaults for that attribute.
+3. CSV import heuristics are limited to low-level parsing characteristics. They must not infer or modify prompt definitions, source-column semantics, output-column mappings, field labels, field visibility, or export order.
+4. In the normal success path, the application imports immediately with the detected settings. The user is not required to review or confirm the detected import settings before the document is loaded.
+5. The `CsvRepository.load()` method reads the file using the detected import settings.
+6. The `CsvDocument` is replaced with the imported headers and rows. The `source_path` and detected `dialect` are recorded.
+7. The detected import settings become the project's current import settings for that imported document and persist on the next project save.
+8. If the project does not yet have established export settings, the application initializes the project's export settings from the detected import settings immediately after the first successful import. After this first-import seeding step, import settings and export settings are independent.
+9. Once export settings exist, later imports must not silently overwrite them with newly detected import settings.
+10. The table view, preview selectors, and prompt controls are refreshed to match the new columns.
+11. The dirty flag is set because the imported data is not yet part of a saved project.
+12. `current_external_csv_path` is updated to the imported file's path.
 
 **Postconditions:** The table displays the imported CSV data. The imported CSV is not yet tied to the project's sibling file.
+
+**Error conditions:**
+- If the selected file cannot be parsed with the detected settings, the current document remains unchanged.
+- If the application offers a retry or correction path after auto-detection fails, that recovery path may ask the user to review or edit import settings, but only as an exception path after the automatic import attempt did not succeed.
+
+**Invariants:**
+- Import auto-detection is the primary import path; the normal successful import flow does not require user confirmation of detected parsing settings.
+- Import heuristics are restricted to CSV parsing characteristics and do not perform source-column auto-detection or other prompt/project inference.
+- Import settings and export settings are separate concepts and may differ for the same project.
+- Before the first successful import, export settings are not yet established for the project.
+- The first successful import seeds initial export settings from the detected import settings exactly once unless the project already had export settings.
+- Importing a CSV does not silently rewrite prompt definitions or column-level project metadata beyond normal synchronization with the newly loaded document headers.
 
 ## Use Case 6: Export the CSV
 
 **Actor:** User
 
-**Description:** The user writes the current `CsvDocument` (including any generated columns) to a CSV file, choosing whether to export all rows or only visible (unfiltered) rows.
+**Description:** The user writes the current `CsvDocument` (including any generated columns) to a CSV file, choosing whether to export all rows or only visible (unfiltered) rows. Export always uses the project's export settings rather than the most recent import heuristics, except that the first successful import may have seeded those export settings.
 
 **Trigger:** User clicks the **Export** button in the CSV Data panel or selects **CSV > Export** from the menu bar.
 
@@ -154,7 +174,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
       - Any current document headers not named by the normalized configured order are appended in their current document-header order.
       - Export still includes every column present in the current `CsvDocument` exactly once; hidden columns are not omitted by this feature.
       - If the field configuration has been reset from the current CSV, the export order matches the current document header order.
-   5f. The `CsvRepository.save()` method writes the (possibly filtered) `CsvDocument` to the target path using the project's `CsvConfig` and the derived export column order.
+    5f. The `CsvRepository.save()` method writes the (possibly filtered) `CsvDocument` to the target path using the project's export `CsvConfig` and the derived export column order.
    5g. The `export_path` is updated in the project's CSV config to the target path, and the dirty flag is set so the change is persisted on next project save.
    5h. The dialog closes.
 6. The status bar shows confirmation of the export location and the number of rows exported.
@@ -174,6 +194,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 - The export dialog remains open on any error or abort, allowing the user to correct the issue.
 - Exporting visible rows creates a temporary in-memory `CsvDocument` and never modifies `self.document`.
 - The `export_path` is stored in the project's CSV config and persists across sessions. The export column order is also part of the project's CSV field configuration and persists across project save/load cycles. On a standalone (non-project) CSV import, `export_path` is not persisted to disk but `current_external_csv_path` is updated in memory.
+- Export uses project-configured export settings, not the current file's import heuristics, unless those export settings were established earlier by the first-import seeding rule.
 - The initial target path for export is always the input CSV path; the user must explicitly change it via typing or Browse.
 
 ## Use Case 7: Add a Prompt
