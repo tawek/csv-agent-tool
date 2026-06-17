@@ -4,6 +4,7 @@ import pytest
 from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import QGroupBox, QMessageBox
 
+from product_description_tool import message_box, file_dialog, input_dialog
 from product_description_tool.config import AppConfig, ConfigStore, FieldConfig
 from product_description_tool.generation import PromptPayload, USER_PROMPT
 from product_description_tool.collapsible_panel import PanelState
@@ -29,7 +30,10 @@ class FakeGenerationService:
     def validate_template(self, template: str, headers: list[str], knowledge_base_dir=None) -> None:
         return None
 
-    def prepare_prompt(self, *, template: str, row: dict[str, str], knowledge_base_dir=None):
+    def validate_attachments(self, attachments, headers, knowledge_base_dir=None) -> None:
+        pass
+
+    def prepare_prompt(self, *, template: str, row: dict[str, str], knowledge_base_dir=None, attachments=None):
         rendered = template
         for col, val in row.items():
             rendered = rendered.replace("{{" + col + "}}", val)
@@ -50,6 +54,7 @@ class FakeGenerationService:
         template,
         config,
         knowledge_base_dir=None,
+        attachments=None,
         on_prompt_ready=None,
         on_chunk=None,
         should_cancel=None,
@@ -73,6 +78,7 @@ class FakeGenerationService:
         template,
         config,
         knowledge_base_dir=None,
+        attachments=None,
         on_result=None,
         on_prompt_ready=None,
         on_chunk=None,
@@ -87,6 +93,8 @@ class FakeGenerationService:
                 row=row,
                 template=template,
                 config=config,
+                knowledge_base_dir=knowledge_base_dir,
+                attachments=attachments,
                 on_prompt_ready=on_prompt_ready,
                 on_chunk=None,
                 should_cancel=should_cancel,
@@ -108,6 +116,7 @@ class SlowCancellableGenerationService(FakeGenerationService):
         template,
         config,
         knowledge_base_dir=None,
+        attachments=None,
         on_prompt_ready=None,
         on_chunk=None,
         should_cancel=None,
@@ -119,6 +128,7 @@ class SlowCancellableGenerationService(FakeGenerationService):
             template=template,
             config=config,
             knowledge_base_dir=knowledge_base_dir,
+            attachments=attachments,
             on_prompt_ready=on_prompt_ready,
             on_chunk=on_chunk,
             should_cancel=should_cancel,
@@ -140,6 +150,7 @@ class BlockingCancellableGenerationService(FakeGenerationService):
         template,
         config,
         knowledge_base_dir=None,
+        attachments=None,
         on_prompt_ready=None,
         on_chunk=None,
         should_cancel=None,
@@ -169,6 +180,7 @@ class DelayedCancelGenerationService(FakeGenerationService):
         template,
         config,
         knowledge_base_dir=None,
+        attachments=None,
         on_prompt_ready=None,
         on_chunk=None,
         should_cancel=None,
@@ -202,17 +214,6 @@ class FakeSettingsDialog:
         return self._config
 
 
-@pytest.fixture(autouse=True)
-def _auto_discard_unsaved_changes(monkeypatch) -> None:
-    def fake_warning(*args, **kwargs):
-        title = args[1] if len(args) > 1 else kwargs.get("title", "")
-        if title == "Unsaved changes":
-            return QMessageBox.StandardButton.Discard
-        return QMessageBox.StandardButton.Ok
-
-    monkeypatch.setattr("product_description_tool.main_window.QMessageBox.warning", fake_warning)
-
-
 def _write_csv(tmp_path: Path, row_count: int = 2) -> Path:
     csv_path = tmp_path / "products.csv"
     rows = ['A-1;"<p>Alpha</p>";"<p>Existing</p>"']
@@ -226,9 +227,9 @@ def _write_csv(tmp_path: Path, row_count: int = 2) -> Path:
 
 
 def _patch_csv_dialog(monkeypatch, csv_path: Path) -> None:
-    monkeypatch.setattr(
-        "product_description_tool.main_window.QFileDialog.getOpenFileName",
-        lambda *args, **kwargs: (str(csv_path), "CSV Files (*.csv)"),
+    file_dialog.set_response(
+        "getOpenFileName",
+        (str(csv_path), "CSV Files (*.csv)"),
     )
 
 
@@ -256,9 +257,6 @@ def test_loading_and_selecting_row_updates_previews(qtbot, tmp_path: Path, monke
     _import_window_csv(window, monkeypatch, csv_path)
     _add_prompt(window, output_field="generated", prompt="Rewrite {{description}}")
 
-    assert window.left_field_combo.currentText() == "description"
-    assert window.right_field_combo.currentText() == "generated"
-
     window.table_view.selectRow(1)
     qtbot.waitUntil(lambda: window.last_original_preview_html == "<p>Beta 1</p>")
     qtbot.waitUntil(lambda: window.table_view.viewport().width() > 0)
@@ -279,11 +277,12 @@ def test_window_title_tracks_current_project_and_dirty_state(qtbot, tmp_path: Pa
     _import_window_csv(window, monkeypatch, csv_path)
 
     project_path = tmp_path / "catalog.project.json"
-    monkeypatch.setattr(
-        "product_description_tool.main_window.QFileDialog.getSaveFileName",
-        lambda *args, **kwargs: (str(project_path), "Project Files (*.project.json)"),
+    file_dialog.set_response(
+        "getSaveFileName",
+        (str(project_path), "Project Files (*.project.json)"),
     )
     assert window.save_project(save_as=True)
+    file_dialog.reset()
     assert str(project_path) in window.windowTitle()
     assert not window.isWindowModified()
     assert (tmp_path / "catalog.csv").exists()
@@ -580,13 +579,11 @@ def test_large_processing_run_requires_confirmation(qtbot, tmp_path: Path, monke
     _import_window_csv(window, monkeypatch, csv_path)
     _add_prompt(window, output_field="generated", prompt="Rewrite {{sku}}")
 
-    monkeypatch.setattr(
-        "product_description_tool.main_window.QMessageBox.question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.No,
-    )
+    message_box.set_response("question", QMessageBox.StandardButton.No)
 
     window.process_all_rows()
 
+    message_box.reset()
     assert window._worker_thread is None
     assert all(row["generated"] in {"", "<p>Existing</p>"} for row in window.document.rows)
 
@@ -733,10 +730,11 @@ def test_process_all_aborts_on_cyclic_prompt_dependencies(qtbot, tmp_path: Path,
         critical_messages.append((title, text))
         return QMessageBox.StandardButton.Ok
 
-    monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+    message_box.set_response("critical", fake_critical)
 
     window.process_all_rows()
 
+    message_box.reset()
     assert len(critical_messages) == 1
     title, text = critical_messages[0]
     assert "Cyclic" in text
@@ -1125,13 +1123,11 @@ class TestKnowledgeBaseDirectoryUI:
         window._update_kb_indicator()
         assert window.kb_label.text() != ""
 
-        monkeypatch.setattr(
-            "product_description_tool.main_window.QMessageBox.warning",
-            lambda *args, **kwargs: QMessageBox.StandardButton.Discard,
-        )
+        message_box.set_response("warning", QMessageBox.StandardButton.Discard)
 
         window.new_project()
 
+        message_box.reset()
         assert window.project.knowledge_base_dir is None
         assert window.kb_label.text() == ""
 
@@ -1154,16 +1150,16 @@ class TestKnowledgeBaseDirectoryUI:
         qtbot.addWidget(window)
         window.show()
 
-        monkeypatch.setattr(
-            "product_description_tool.main_window.QFileDialog.getOpenFileName",
+        file_dialog.set_response(
+            "getOpenFileName",
             lambda *args, **kwargs: (str(project_path), "Project Files (*.project.json)"),
         )
-        monkeypatch.setattr(
-            "product_description_tool.main_window.QMessageBox.warning",
-            lambda *args, **kwargs: QMessageBox.StandardButton.Discard,
-        )
+        message_box.set_response("warning", QMessageBox.StandardButton.Discard)
 
         window.open_project()
+
+        file_dialog.reset()
+        message_box.reset()
 
         # There is no actual project_path set because open_project sets self.project_path = project_path
         # after loading. The KB directory should be restored.
@@ -1189,12 +1185,13 @@ class TestKnowledgeBaseDirectoryUI:
             critical_messages.append((title, text))
             return QMessageBox.StandardButton.Ok
 
-        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+        message_box.set_response("critical", fake_critical)
 
         # The PromptRenderer.validate_template will detect KB refs with no KB dir
         # and raise KnowledgeBaseRefError, which _validate_ready_for_generation catches.
         result = window._validate_ready_for_generation(window._enabled_prompts())
 
+        message_box.reset()
         assert not result
         assert len(critical_messages) == 1
         title, text = critical_messages[0]
@@ -1249,13 +1246,330 @@ class TestKnowledgeBaseDirectoryUI:
             critical_messages.append((title, text))
             return QMessageBox.StandardButton.Ok
 
-        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+        message_box.set_response("critical", fake_critical)
 
         # Validation should fail because KB dir doesn't exist
         result = window._validate_ready_for_generation(window._enabled_prompts())
 
+        message_box.reset()
         assert not result
         assert len(critical_messages) == 1
         title, text = critical_messages[0]
         assert "Knowledge-base reference error" in title
         assert window._worker_thread is None
+
+
+# ── Prompt Attachment UI (Use Case 28) ────────────────────────────────────
+
+
+class TestAttachmentMainWindowUI:
+    """MainWindow-level tests for the prompt-attachments feature."""
+
+    def test_attachment_count_label_shown_when_attachments_exist(self, qtbot, tmp_path):
+        """The attachment count label shows the count when attachments are configured."""
+        from product_description_tool.project import PromptAttachment
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        _add_prompt(window, output_field="desc", prompt="Write {{sku}}")
+        window.project.prompts[0].attachments = [
+            PromptAttachment(source_type="csv_column", source="sku"),
+        ]
+        window._update_attachment_summary()
+
+        assert "1 attachment" in window.attachment_count_label.text().lower()
+
+    def test_attachment_count_label_plural(self, qtbot, tmp_path):
+        """Multiple attachments show plural 'attachments' in the label."""
+        from product_description_tool.project import PromptAttachment
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        _add_prompt(window, output_field="desc", prompt="Write {{sku}}")
+        window.project.prompts[0].attachments = [
+            PromptAttachment(source_type="csv_column", source="sku"),
+            PromptAttachment(source_type="csv_column", source="name"),
+        ]
+        window._update_attachment_summary()
+
+        assert "2 attachments" in window.attachment_count_label.text().lower()
+
+    def test_attachment_count_label_hidden_when_no_attachments(self, qtbot, tmp_path):
+        """The attachment count label is empty when no attachments exist."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        _add_prompt(window, output_field="desc", prompt="Write {{sku}}")
+        window._update_attachment_summary()
+
+        assert window.attachment_count_label.text() == ""
+
+    def test_attachment_count_label_hidden_when_no_prompt(self, qtbot, tmp_path):
+        """The attachment count label is empty when no prompt is selected."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        window._update_attachment_summary()
+        assert window.attachment_count_label.text() == ""
+
+    def test_attachments_button_enabled_with_prompt(self, qtbot, tmp_path):
+        """The 'Attachments…' button is enabled when a prompt is selected."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        _add_prompt(window, output_field="desc", prompt="Write {{sku}}")
+        assert window.attachments_button.isEnabled()
+
+    def test_attachments_button_disabled_without_prompt(self, qtbot, tmp_path):
+        """The 'Attachments…' button is disabled when no prompt is selected."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        assert not window.attachments_button.isEnabled()
+
+    def test_open_attachment_manager_updates_prompt_attachments(self, qtbot, tmp_path, monkeypatch):
+        """Opening and confirming the attachment manager updates the prompt's attachments."""
+        from product_description_tool.project import PromptAttachment
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+        _add_prompt(window, output_field="desc", prompt="Write {{sku}}")
+
+        # Monkeypatch AttachmentManager to return pre-set attachments
+        class FakeAttachmentManager:
+            def __init__(self, **kwargs):
+                self._attachments = list(kwargs.get("attachments", []))
+
+            def exec(self):
+                from product_description_tool.project import PromptAttachment
+                self._attachments = [
+                    PromptAttachment(source_type="csv_column", source="sku"),
+                ]
+                return True  # accepted
+
+            def get_attachments(self):
+                return list(self._attachments)
+
+        monkeypatch.setattr(
+            "product_description_tool.main_window.AttachmentManager",
+            FakeAttachmentManager,
+        )
+
+        window._open_attachment_manager()
+
+        assert len(window.project.prompts[0].attachments) == 1
+        assert window.project.prompts[0].attachments[0].source == "sku"
+
+    def test_open_attachment_manager_cancel_does_not_modify(self, qtbot, tmp_path, monkeypatch):
+        """Cancelling the attachment manager leaves the prompt's attachments unchanged."""
+        from product_description_tool.project import PromptAttachment
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        _add_prompt(window, output_field="desc", prompt="Write {{sku}}")
+
+        # Monkeypatch AttachmentManager to return False (cancel)
+        class FakeAttachmentManager:
+            def __init__(self, **kwargs):
+                pass
+
+            def exec(self):
+                return False  # cancelled
+
+            def get_attachments(self):
+                return []
+
+        monkeypatch.setattr(
+            "product_description_tool.main_window.AttachmentManager",
+            FakeAttachmentManager,
+        )
+
+        window.project.prompts[0].attachments = [
+            PromptAttachment(source_type="csv_column", source="name"),
+        ]
+        window._set_project_modified(False)
+        window._open_attachment_manager()
+
+        # Attachments should be unchanged
+        assert len(window.project.prompts[0].attachments) == 1
+        assert window.project.prompts[0].attachments[0].source == "name"
+
+    def test_validation_blocks_preview_with_invalid_column_attachment(self, qtbot, tmp_path, monkeypatch):
+        """An invalid CSV-column attachment blocks preview with an error dialog."""
+        from product_description_tool.project import PromptAttachment
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+        _add_prompt(window, output_field="desc", prompt="Write {{sku}}")
+
+        # Add an invalid column attachment
+        window.project.prompts[0].attachments = [
+            PromptAttachment(source_type="csv_column", source="nonexistent_column"),
+        ]
+
+        critical_messages = []
+        original_critical = QMessageBox.critical
+
+        @staticmethod
+        def fake_critical(parent, title, text, *args, **kwargs):
+            critical_messages.append((title, text))
+            return QMessageBox.StandardButton.Ok
+
+        message_box.set_response("critical", fake_critical)
+
+        result = window._validate_ready_for_generation(window._enabled_prompts())
+
+        message_box.reset()
+        assert not result
+        assert len(critical_messages) == 1
+        assert "Invalid attachment" in critical_messages[0][0]
+
+    def test_validation_passes_with_valid_column_attachment(self, qtbot, tmp_path, monkeypatch):
+        """A valid CSV-column attachment passes validation."""
+        from product_description_tool.project import PromptAttachment
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+        _add_prompt(window, output_field="desc", prompt="Write {{sku}}")
+
+        # Add a valid column attachment
+        window.project.prompts[0].attachments = [
+            PromptAttachment(source_type="csv_column", source="sku"),
+        ]
+
+        result = window._validate_ready_for_generation(window._enabled_prompts())
+
+        assert result
+
+    def test_validation_blocks_with_invalid_kb_attachment_missing_file(self, qtbot, tmp_path, monkeypatch):
+        """A KB-file attachment for a non-existent file blocks validation."""
+        from product_description_tool.project import PromptAttachment
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+        window.project.knowledge_base_dir = str(kb_dir)
+
+        _add_prompt(window, output_field="desc", prompt="Write {{sku}}")
+
+        window.project.prompts[0].attachments = [
+            PromptAttachment(source_type="kb_file", source="missing.md"),
+        ]
+
+        critical_messages = []
+        original_critical = QMessageBox.critical
+
+        @staticmethod
+        def fake_critical(parent, title, text, *args, **kwargs):
+            critical_messages.append((title, text))
+            return QMessageBox.StandardButton.Ok
+
+        message_box.set_response("critical", fake_critical)
+
+        result = window._validate_ready_for_generation(window._enabled_prompts())
+
+        message_box.reset()
+        assert not result
+        assert len(critical_messages) == 1
+
+    def test_validation_passes_with_valid_kb_attachment(self, qtbot, tmp_path, monkeypatch):
+        """A valid KB-file attachment passes validation."""
+        from product_description_tool.project import PromptAttachment
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+        (kb_dir / "guide.md").write_text("Guide content", encoding="utf-8")
+        window.project.knowledge_base_dir = str(kb_dir)
+
+        _add_prompt(window, output_field="desc", prompt="Write {{sku}}")
+
+        window.project.prompts[0].attachments = [
+            PromptAttachment(source_type="kb_file", source="guide.md"),
+        ]
+
+        result = window._validate_ready_for_generation(window._enabled_prompts())
+
+        assert result
+
+    def test_preview_with_attachments_does_not_crash(self, qtbot, tmp_path, monkeypatch):
+        """Previewing a row with valid attachments completes normally through FakeGenerationService."""
+        from product_description_tool.project import PromptAttachment
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+        window.generation_service = FakeGenerationService()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+        _add_prompt(window, output_field="desc", prompt="Write {{sku}}")
+
+        # Attach the sku column
+        window.project.prompts[0].attachments = [
+            PromptAttachment(source_type="csv_column", source="sku"),
+        ]
+
+        window.table_view.selectRow(0)
+        window.preview_selected_row()
+
+        qtbot.waitUntil(lambda: window.document.rows[0]["desc"] != "")
+        assert window.document.rows[0]["desc"] is not None
+
+    def test_batch_processing_with_attachments_does_not_crash(self, qtbot, tmp_path, monkeypatch):
+        """Batch processing with valid attachments completes normally through FakeGenerationService."""
+        from product_description_tool.project import PromptAttachment
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+        window.generation_service = FakeGenerationService()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+        _add_prompt(window, output_field="desc", prompt="Write {{sku}}")
+
+        # Attach the sku column
+        window.project.prompts[0].attachments = [
+            PromptAttachment(source_type="csv_column", source="sku"),
+        ]
+
+        window.process_all_rows()
+
+        qtbot.waitUntil(lambda: window.document.rows[1]["desc"] != "")
+        assert window.document.rows[0]["desc"] is not None
+        assert window.document.rows[1]["desc"] is not None

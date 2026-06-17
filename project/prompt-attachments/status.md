@@ -1,0 +1,29 @@
+## Status
+
+- Request captured.
+- Specification updated to define prompt attachments as separate per-prompt metadata, attachment-management UI expectations, validation, effective-prompt assembly, persistence, and backward compatibility.
+- Team workflow updated to require artifact-driven specialist handoffs in `AGENTS.md` and `.opencode/agents/*.md`.
+- User clarified that CSV-column selection and KB-file selection should be separate flows rather than a single mixed picker.
+- Specification revised to require separate source-specific add flows: KB files via a simplified select-only KB explorer, CSV columns via a dedicated column list/dropdown, with no virtualized "columns as KB branch/directory" UX.
+- User clarified the default ordering rule: KB-file attachments should be inserted before CSV-column attachments so the prompt prefix stays constant by default, while still allowing manual reordering that places columns first.
+- Specification revised to require a small fine-print warning whenever any CSV-column attachment is ordered before any KB-file attachment because that layout may increase prompt cost by reducing stable-prefix caching benefits.
+- Blocking issue identified: current tests need suite-wide modal-dialog stubbing and 30-second-capped validation discipline before reliable unattended test execution.
+- Test-blocker mitigation applied in `tests/conftest.py`; targeted 30-second-capped validations now exit cleanly.
+- Source implementation has been refined to use separate KB-file and CSV-column add flows, default KB-first insertion, manual reordering, and the fine-print cost warning for column-first ordering.
+- Implementation phase: source changes applied.
+  - Removed `AddAttachmentsPicker` (mixed source picker) from `dialogs.py`.
+  - Added `AddKbAttachmentsDialog` — separate modal dialog for KB-file-only selection with search and multi-check.
+  - Added `AddColumnAttachmentsDialog` — separate modal dialog for column-only selection with search and multi-check.
+  - Updated `AttachmentManager` with split add buttons ("Add KB Files…" and "Add Columns…"), KB-first default insertion, cost warning when any CSV column precedes any KB file, and disabled add buttons when no sources of that type are available.
+  - Cleaned up `AddAttachmentsPicker` import from `main_window.py`.
+- Pre-existing concerns: worker already passes `attachments=prompt.attachments` but `FakeGenerationService.process_row` in tests does not accept the keyword — 6 tests fail with `TypeError` masked as timeout. This predates the current source changes and needs a test-side update.
+- QA updated the test doubles and added prompt-attachment coverage.
+- Reported validation outcomes:
+  - `tests/test_main_window.py -x -q` passed with prompt-attachment coverage included.
+  - `tests/test_attachments.py -x -q` passed.
+  - full suite `uv run pytest -x -q` passed within the 30-second cap.
+- AR-1 (architect finding): fixed — added `_kb_help_label` below action buttons; shows "Knowledge-base file attachments require a configured project knowledge-base directory." when no KB root is set.
+- Post-fix validation:
+  - `tests/test_attachments.py -q` passed.
+  - `tests/test_main_window.py -q` passed.
+  - full suite `uv run pytest -q` passed (`324 passed`).

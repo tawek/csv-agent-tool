@@ -7,8 +7,15 @@ from typing import Sequence
 
 PLACEHOLDER_PATTERN = re.compile(r"{{\s*(.+?)\s*}}")
 
+from product_description_tool.kb_conversion import (
+    ALL_KB_EXTENSIONS,
+    CONVERTIBLE_EXTENSIONS,
+    KnowledgeBaseContentService,
+)
+
 KB_REF_PREFIX = "@"
-SUPPORTED_KB_EXTENSIONS = {".md", ".markdown", ".csv"}
+# All KB-supported extensions: direct-read and convertible types.
+SUPPORTED_KB_EXTENSIONS = ALL_KB_EXTENSIONS
 
 
 class CycleError(Exception):
@@ -132,12 +139,22 @@ class PromptRenderer:
                 )
                 continue
 
-            # Check readable
-            try:
-                candidate.read_bytes()
-            except (OSError, PermissionError):
-                errors.append(f"{placeholder}: file is not readable")
-                continue
+            # For convertible file types, validate the conversion path
+            if candidate.suffix.lower() in CONVERTIBLE_EXTENSIONS:
+                svc = KnowledgeBaseContentService()
+                err_msg = svc.validate_supported(candidate)
+                if err_msg is not None:
+                    errors.append(f"{placeholder}: {err_msg}")
+                    continue
+
+            # Check readable (direct-read files only; convertible files
+            # are validated by the conversion service at load time)
+            if candidate.suffix.lower() not in CONVERTIBLE_EXTENSIONS:
+                try:
+                    candidate.read_bytes()
+                except (OSError, PermissionError):
+                    errors.append(f"{placeholder}: file is not readable")
+                    continue
 
         if errors:
             raise KnowledgeBaseRefError(errors)
@@ -149,6 +166,8 @@ class PromptRenderer:
         if knowledge_base_dir is not None:
             kb_path = Path(knowledge_base_dir).resolve()
 
+        content_svc = KnowledgeBaseContentService()
+
         def replace(match: re.Match[str]) -> str:
             name = match.group(1)
             if name.startswith(KB_REF_PREFIX):
@@ -157,8 +176,11 @@ class PromptRenderer:
                 ref_path = name[len(KB_REF_PREFIX):]
                 resolved = (kb_path / ref_path).resolve()
                 try:
+                    suffix = resolved.suffix.lower()
+                    if suffix in CONVERTIBLE_EXTENSIONS:
+                        return content_svc.load_markdown(resolved, kb_path)
                     return resolved.read_text(encoding="utf-8")
-                except (OSError, PermissionError):
+                except (OSError, PermissionError, ValueError):
                     return ""
             return row.get(name, "")
 

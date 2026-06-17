@@ -14,13 +14,12 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
-    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
@@ -33,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from product_description_tool import message_box, file_dialog
 from product_description_tool.config import (
     AppConfig,
     CsvConfig,
@@ -41,6 +41,9 @@ from product_description_tool.config import (
 from product_description_tool.generation import estimate_tokens_from_chars
 from product_description_tool.highlighter import HtmlSyntaxHighlighter
 from product_description_tool.providers import list_ollama_models, list_openai_models
+
+from .message_box import information, warning, critical, question, QMessageBoxStandardButton as StandardButton
+from .file_dialog import get_open_file_name, get_save_file_name, get_existing_directory
 
 
 class SpinnerWidget(QWidget):
@@ -514,7 +517,7 @@ class SettingsDialog(QDialog):
         try:
             model_names = loader()
         except Exception as exc:
-            QMessageBox.warning(
+            warning(
                 self,
                 f"{provider_name} Models",
                 f"Could not load models from {provider_name}: {exc}",
@@ -526,7 +529,7 @@ class SettingsDialog(QDialog):
 
         self._replace_model_choices(combo, model_names)
         if not model_names:
-            QMessageBox.information(
+            information(
                 self,
                 f"{provider_name} Models",
                 f"{provider_name} did not return any models.",
@@ -770,7 +773,7 @@ class SettingsDialog(QDialog):
         try:
             self.get_config()
         except ValueError as exc:
-            QMessageBox.critical(self, "Invalid settings", str(exc))
+            critical(self, "Invalid settings", str(exc))
             return
         self.accept()
 
@@ -877,7 +880,7 @@ class ExportDialog(QDialog):
         layout.addLayout(button_layout)
 
     def _browse_path(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
+        path = get_save_file_name(
             self,
             "Export CSV",
             self.path_edit.text(),
@@ -889,24 +892,24 @@ class ExportDialog(QDialog):
     def _on_export(self) -> None:
         target = self.path_edit.text().strip()
         if not target:
-            QMessageBox.warning(self, "Export", "Target path must not be empty.")
+            warning(self, "Export", "Target path must not be empty.")
             return
 
         self._export_only_visible = self.visible_checkbox.isChecked()
         file_exists = Path(target).exists()
 
         if file_exists:
-            reply = QMessageBox.question(
+            reply = question(
                 self,
                 "Confirm Overwrite",
                 f"File '{target}' already exists. Overwrite?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                StandardButton.Yes | StandardButton.No,
             )
-            if reply != QMessageBox.StandardButton.Yes:
+            if reply != StandardButton.Yes:
                 return
 
         if self._export_only_visible and not self.visible_checkbox.isEnabled():
-            QMessageBox.warning(self, "Export", "No visible rows to export.")
+            warning(self, "Export", "No visible rows to export.")
             return
 
         self._confirmed = True
@@ -914,3 +917,583 @@ class ExportDialog(QDialog):
 
     def get_result(self) -> tuple[str, bool]:
         return (self.path_edit.text().strip(), self.visible_checkbox.isChecked())
+
+
+class AddKbAttachmentsDialog(QDialog):
+    """Small modal dialog for selecting one or more KB files as prompt attachments."""
+
+    def __init__(
+        self,
+        *,
+        kb_files: list[str],
+        existing_sources: set[str],
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Add Knowledge-Base Attachments")
+        self.setModal(True)
+        self.resize(500, 380)
+
+        self._kb_files = kb_files
+        self._existing_sources = existing_sources
+        self._selected_sources: list[str] = []
+
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel(
+            "Select one or more knowledge-base files to append as prompt "
+            "attachments. The prompt text itself will not be modified."
+        ))
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search files...")
+        self.search_edit.textChanged.connect(self._rebuild_list)
+        layout.addWidget(self.search_edit)
+
+        self.list_widget = QTableWidget(0, 2)
+        self.list_widget.setHorizontalHeaderLabels(["", "File"])
+        self.list_widget.verticalHeader().setVisible(False)
+        self.list_widget.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
+        self.list_widget.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        layout.addWidget(self.list_widget, 1)
+
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("color: gray;")
+        layout.addWidget(self.status_label)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch(1)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+        self.add_button = QPushButton("Add Selected")
+        self.add_button.setEnabled(False)
+        self.add_button.clicked.connect(self._confirm)
+        button_layout.addWidget(self.add_button)
+        layout.addLayout(button_layout)
+
+        self._rebuild_list()
+
+    def _rebuild_list(self) -> None:
+        search_text = self.search_edit.text().strip().lower()
+        rows = [p for p in self._kb_files if not search_text or search_text in p.lower()]
+
+        self.list_widget.setRowCount(len(rows))
+        for row_idx, path in enumerate(rows):
+            already = path in self._existing_sources
+            chk = QTableWidgetItem()
+            chk.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsUserCheckable
+                | Qt.ItemFlag.ItemIsSelectable
+            )
+            if already:
+                chk.setCheckState(Qt.CheckState.Unchecked)
+                chk.setFlags(chk.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            else:
+                chk.setCheckState(Qt.CheckState.Unchecked)
+            self.list_widget.setItem(row_idx, 0, chk)
+
+            item = QTableWidgetItem(path)
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            if already:
+                item.setForeground(QColor("gray"))
+            self.list_widget.setItem(row_idx, 1, item)
+
+        if not rows:
+            if not self._kb_files:
+                self.status_label.setText("No supported knowledge-base files are available.")
+            else:
+                self.status_label.setText("No knowledge-base files match the current search.")
+        else:
+            self.status_label.setText("")
+
+        self.list_widget.itemChanged.connect(self._update_add_button)
+        self._update_add_button()
+
+    def _update_add_button(self) -> None:
+        self.add_button.setEnabled(self._count_checked() > 0)
+
+    def _count_checked(self) -> int:
+        count = 0
+        for row in range(self.list_widget.rowCount()):
+            item = self.list_widget.item(row, 0)
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
+                count += 1
+        return count
+
+    def _confirm(self) -> None:
+        sources = []
+        for row in range(self.list_widget.rowCount()):
+            item = self.list_widget.item(row, 0)
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
+                src_item = self.list_widget.item(row, 1)
+                if src_item is not None:
+                    sources.append(src_item.text())
+        self._selected_sources = sources
+        self.accept()
+
+    def selected_sources(self) -> list[str]:
+        return self._selected_sources
+
+
+class AddColumnAttachmentsDialog(QDialog):
+    """Small modal dialog for selecting one or more CSV columns as prompt attachments."""
+
+    def __init__(
+        self,
+        *,
+        csv_columns: list[str],
+        existing_sources: set[str],
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Add Column Attachments")
+        self.setModal(True)
+        self.resize(460, 340)
+
+        self._csv_columns = csv_columns
+        self._existing_sources = existing_sources
+        self._selected_sources: list[str] = []
+
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel(
+            "Select one or more current CSV columns to append as prompt "
+            "attachments. The prompt text itself will not be modified."
+        ))
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search columns...")
+        self.search_edit.textChanged.connect(self._rebuild_list)
+        layout.addWidget(self.search_edit)
+
+        self.list_widget = QTableWidget(0, 2)
+        self.list_widget.setHorizontalHeaderLabels(["", "Column"])
+        self.list_widget.verticalHeader().setVisible(False)
+        self.list_widget.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
+        self.list_widget.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        layout.addWidget(self.list_widget, 1)
+
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("color: gray;")
+        layout.addWidget(self.status_label)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch(1)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+        self.add_button = QPushButton("Add Selected")
+        self.add_button.setEnabled(False)
+        self.add_button.clicked.connect(self._confirm)
+        button_layout.addWidget(self.add_button)
+        layout.addLayout(button_layout)
+
+        self._rebuild_list()
+
+    def _rebuild_list(self) -> None:
+        search_text = self.search_edit.text().strip().lower()
+        rows = [c for c in self._csv_columns if not search_text or search_text in c.lower()]
+
+        self.list_widget.setRowCount(len(rows))
+        for row_idx, col_name in enumerate(rows):
+            already = col_name in self._existing_sources
+            chk = QTableWidgetItem()
+            chk.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsUserCheckable
+                | Qt.ItemFlag.ItemIsSelectable
+            )
+            if already:
+                chk.setCheckState(Qt.CheckState.Unchecked)
+                chk.setFlags(chk.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            else:
+                chk.setCheckState(Qt.CheckState.Unchecked)
+            self.list_widget.setItem(row_idx, 0, chk)
+
+            item = QTableWidgetItem(col_name)
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            if already:
+                item.setForeground(QColor("gray"))
+            self.list_widget.setItem(row_idx, 1, item)
+
+        if not rows:
+            if not self._csv_columns:
+                self.status_label.setText("No current CSV columns are available.")
+            else:
+                self.status_label.setText("No columns match the current search.")
+        else:
+            self.status_label.setText("")
+
+        self.list_widget.itemChanged.connect(self._update_add_button)
+        self._update_add_button()
+
+    def _update_add_button(self) -> None:
+        self.add_button.setEnabled(self._count_checked() > 0)
+
+    def _count_checked(self) -> int:
+        count = 0
+        for row in range(self.list_widget.rowCount()):
+            item = self.list_widget.item(row, 0)
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
+                count += 1
+        return count
+
+    def _confirm(self) -> None:
+        sources = []
+        for row in range(self.list_widget.rowCount()):
+            item = self.list_widget.item(row, 0)
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
+                src_item = self.list_widget.item(row, 1)
+                if src_item is not None:
+                    sources.append(src_item.text())
+        self._selected_sources = sources
+        self.accept()
+
+    def selected_sources(self) -> list[str]:
+        return self._selected_sources
+
+
+class AttachmentManager(QDialog):
+    """Modal dialog for managing the selected prompt's attachment metadata.
+
+    Supports add, remove, and reorder (Move Up / Move Down).  The order
+    shown is the effective processing order.
+    """
+
+    def __init__(
+        self,
+        *,
+        prompt_output_field: str,
+        attachments: list,
+        knowledge_base_dir: str | None = None,
+        kb_files: list[str] | None = None,
+        csv_columns: list[str] | None = None,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Prompt Attachments — {prompt_output_field}")
+        self.setModal(True)
+        self.resize(620, 440)
+
+        from product_description_tool.project import PromptAttachment
+
+        self._attachments: list[PromptAttachment] = list(attachments)
+        self._prompt_output_field = prompt_output_field
+        self._knowledge_base_dir = knowledge_base_dir
+        self._kb_files = kb_files or []
+        self._csv_columns = csv_columns or []
+
+        layout = QVBoxLayout(self)
+
+        # Info text
+        info_label = QLabel(
+            "Attachments are stored as prompt metadata and are appended "
+            "automatically to the effective prompt with source provenance. "
+            "The prompt text itself is not modified."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #555; font-size: 11px; padding: 4px 0;")
+        layout.addWidget(info_label)
+
+        # Attachment table
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["#", "Type", "Source", "Status"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.itemSelectionChanged.connect(self._update_button_states)
+        layout.addWidget(self.table, 1)
+
+        # Status area
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("color: #888; font-size: 11px;")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        # Action buttons — two separate add flows per spec
+        action_layout = QHBoxLayout()
+        self.add_kb_button = QPushButton("Add KB Files\u2026")
+        self.add_kb_button.clicked.connect(self._on_add_kb_files)
+        action_layout.addWidget(self.add_kb_button)
+
+        self.add_column_button = QPushButton("Add Columns\u2026")
+        self.add_column_button.clicked.connect(self._on_add_columns)
+        action_layout.addWidget(self.add_column_button)
+
+        self.remove_button = QPushButton("Remove")
+        self.remove_button.setEnabled(False)
+        self.remove_button.clicked.connect(self._on_remove)
+        action_layout.addWidget(self.remove_button)
+
+        action_layout.addStretch(1)
+
+        self.move_up_button = QPushButton("Move Up")
+        self.move_up_button.setEnabled(False)
+        self.move_up_button.clicked.connect(self._on_move_up)
+        action_layout.addWidget(self.move_up_button)
+
+        self.move_down_button = QPushButton("Move Down")
+        self.move_down_button.setEnabled(False)
+        self.move_down_button.clicked.connect(self._on_move_down)
+        action_layout.addWidget(self.move_down_button)
+
+        layout.addLayout(action_layout)
+
+        # Help text shown when KB directory is not configured
+        self._kb_help_label = QLabel("")
+        self._kb_help_label.setStyleSheet(
+            "color: #888; font-size: 10px; font-style: italic; padding: 2px 0;"
+        )
+        self._kb_help_label.setWordWrap(True)
+        self._kb_help_label.setVisible(False)
+        layout.addWidget(self._kb_help_label)
+
+        # Cost warning label — shown when any CSV column is ordered before a KB file
+        self.cost_warning_label = QLabel("")
+        self.cost_warning_label.setStyleSheet(
+            "color: #888; font-size: 10px; font-style: italic; padding: 2px 0;"
+        )
+        self.cost_warning_label.setWordWrap(True)
+        layout.addWidget(self.cost_warning_label)
+
+        # Close button
+        close_layout = QHBoxLayout()
+        close_layout.addStretch(1)
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.accept)
+        close_layout.addWidget(close_button)
+        layout.addLayout(close_layout)
+
+        self._refresh_table()
+
+    def _resolve_kb_file_status(self, source: str) -> str:
+        """Return a status string for a KB file attachment."""
+        if not self._knowledge_base_dir:
+            return "Missing KB root"
+        kb_path = Path(self._knowledge_base_dir).resolve()
+        candidate = (kb_path / source).resolve()
+        try:
+            candidate.relative_to(kb_path)
+        except ValueError:
+            return "Path escapes KB directory"
+        if not candidate.exists():
+            return "File not found"
+        if candidate.suffix.lower() not in {".md", ".markdown", ".csv"}:
+            return "Unsupported type"
+        return "Available"
+
+    def _resolve_column_status(self, source: str) -> str:
+        """Return a status string for a CSV column attachment."""
+        if source in self._csv_columns:
+            return "Available"
+        return "Column not found"
+
+    def _refresh_table(self) -> None:
+        self.table.setRowCount(len(self._attachments))
+        for idx, att in enumerate(self._attachments):
+            # Position number
+            num_item = QTableWidgetItem(str(idx + 1))
+            num_item.setFlags(num_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(idx, 0, num_item)
+
+            # Type
+            type_label = "KB file" if att.source_type == "kb_file" else "CSV column"
+            type_item = QTableWidgetItem(type_label)
+            type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(idx, 1, type_item)
+
+            # Source
+            source_item = QTableWidgetItem(att.source)
+            source_item.setFlags(source_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(idx, 2, source_item)
+
+            # Status/Notes
+            if att.source_type == "kb_file":
+                status = self._resolve_kb_file_status(att.source)
+            else:
+                status = self._resolve_column_status(att.source)
+            status_item = QTableWidgetItem(status)
+            status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            if status != "Available":
+                status_item.setForeground(QColor("#cc6600"))
+            self.table.setItem(idx, 3, status_item)
+
+        self._update_button_states()
+        self._update_status_text()
+        self._update_cost_warning()
+
+    def _update_cost_warning(self) -> None:
+        """Show fine-print warning if any CSV column is ordered before any KB file."""
+        csv_before_kb = False
+        found_kb = False
+        # Scan from the end to find the first KB file; if we encounter a CSV
+        # column after having seen at least one KB file, the condition applies.
+        for att in reversed(self._attachments):
+            if att.source_type == "kb_file":
+                found_kb = True
+            elif att.source_type == "csv_column" and found_kb:
+                csv_before_kb = True
+                break
+        if csv_before_kb:
+            self.cost_warning_label.setText(
+                "Note: Moving a CSV-column attachment above any KB-file "
+                "attachment may increase prompt cost because KB content may "
+                "be reprocessed instead of benefiting from a more stable prefix."
+            )
+        else:
+            self.cost_warning_label.setText("")
+
+    def _update_status_text(self) -> None:
+        # Don't show empty-state message when KB directory is missing;
+        # _kb_help_label already explains why attachments can't be added.
+        if not self._knowledge_base_dir:
+            self.status_label.setText("")
+            return
+        if not self._attachments:
+            self.status_label.setText("No attachments configured for this prompt.")
+        else:
+            has_issues = False
+            for row_idx in range(self.table.rowCount()):
+                status_item = self.table.item(row_idx, 3)
+                if status_item is not None and status_item.text() != "Available":
+                    has_issues = True
+                    break
+            if has_issues:
+                self.status_label.setText(
+                    "Some attachments have issues (see Status column). "
+                    "Preview and processing will be blocked until resolved."
+                )
+            else:
+                self.status_label.setText("")
+
+    def _update_button_states(self) -> None:
+        selected_rows = self.table.selectionModel().selectedRows()
+        has_selection = len(selected_rows) > 0
+        self.remove_button.setEnabled(has_selection)
+        self.move_up_button.setEnabled(has_selection and selected_rows[0].row() > 0)
+        self.move_down_button.setEnabled(
+            has_selection and selected_rows[0].row() < self.table.rowCount() - 1
+        )
+        # Disable add flows when no sources of that type are available
+        no_kb = not self._knowledge_base_dir or not self._kb_files
+        no_columns = not self._csv_columns
+        self.add_kb_button.setEnabled(not no_kb)
+        self.add_column_button.setEnabled(not no_columns)
+        self._update_kb_help()
+
+    def _update_kb_help(self) -> None:
+        """Show explanatory text when KB directory is not configured."""
+        if not self._knowledge_base_dir:
+            self._kb_help_label.setText(
+                "Knowledge-base file attachments require a configured "
+                "project knowledge-base directory."
+            )
+            self._kb_help_label.setVisible(True)
+        else:
+            self._kb_help_label.setVisible(False)
+
+    def _insert_kb_attachments(self, sources: list[str]) -> None:
+        """Insert new KB-file attachments before the first CSV column, or at end."""
+        from product_description_tool.project import PromptAttachment
+
+        new_attachments = [
+            PromptAttachment(source_type="kb_file", source=s)
+            for s in sources
+        ]
+        # Find the index of the first CSV column attachment
+        insert_idx = len(self._attachments)
+        for idx, att in enumerate(self._attachments):
+            if att.source_type == "csv_column":
+                insert_idx = idx
+                break
+        self._attachments[insert_idx:insert_idx] = new_attachments
+
+    def _insert_column_attachments(self, sources: list[str]) -> None:
+        """Insert new CSV-column attachments after all existing attachments."""
+        from product_description_tool.project import PromptAttachment
+
+        new_attachments = [
+            PromptAttachment(source_type="csv_column", source=s)
+            for s in sources
+        ]
+        self._attachments.extend(new_attachments)
+
+    def _on_add_kb_files(self) -> None:
+        existing_kb = {a.source for a in self._attachments if a.source_type == "kb_file"}
+        dialog = AddKbAttachmentsDialog(
+            kb_files=self._kb_files,
+            existing_sources=existing_kb,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        sources = dialog.selected_sources()
+        if sources:
+            self._insert_kb_attachments(sources)
+            self._refresh_table()
+
+    def _on_add_columns(self) -> None:
+        existing_cols = {a.source for a in self._attachments if a.source_type == "csv_column"}
+        dialog = AddColumnAttachmentsDialog(
+            csv_columns=self._csv_columns,
+            existing_sources=existing_cols,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        sources = dialog.selected_sources()
+        if sources:
+            self._insert_column_attachments(sources)
+            self._refresh_table()
+
+    def _on_remove(self) -> None:
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+        row = selected_rows[0].row()
+        if 0 <= row < len(self._attachments):
+            del self._attachments[row]
+            self._refresh_table()
+
+    def _on_move_up(self) -> None:
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+        row = selected_rows[0].row()
+        if row > 0:
+            self._attachments[row], self._attachments[row - 1] = (
+                self._attachments[row - 1],
+                self._attachments[row],
+            )
+            self._refresh_table()
+            self.table.selectRow(row - 1)
+
+    def _on_move_down(self) -> None:
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+        row = selected_rows[0].row()
+        if row < len(self._attachments) - 1:
+            self._attachments[row], self._attachments[row + 1] = (
+                self._attachments[row + 1],
+                self._attachments[row],
+            )
+            self._refresh_table()
+            self.table.selectRow(row + 1)
+
+    def get_attachments(self):
+        return list(self._attachments)

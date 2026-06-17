@@ -1,6 +1,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog
 
+from product_description_tool import file_dialog
 from product_description_tool.config import AppConfig, FieldConfig
 from product_description_tool.dialogs import ActivityDialog, ExportDialog, SettingsDialog
 
@@ -284,16 +285,11 @@ def test_export_dialog_browse_updates_path(qtbot, monkeypatch) -> None:
     )
     qtbot.addWidget(dialog)
 
-    def mock_get_save_filename(*args, **kwargs):
-        return ("/tmp/browsed.csv", "CSV Files (*.csv)")
-
-    monkeypatch.setattr(
-        "product_description_tool.dialogs.QFileDialog.getSaveFileName",
-        mock_get_save_filename,
-    )
+    file_dialog.set_response("getSaveFileName", ("/tmp/browsed.csv", "CSV Files (*.csv)"))
 
     dialog._browse_path()
 
+    file_dialog.reset()
     assert dialog.path_edit.text() == "/tmp/browsed.csv"
 
 

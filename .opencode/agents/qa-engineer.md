@@ -22,6 +22,7 @@ You design and maintain the test strategy for this PySide6 desktop application. 
 - **Tests**: `tests/`
 - **Run tests**: `QT_QPA_PLATFORM=offscreen PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1 uv run pytest`
 - **Package manager**: uv (all commands via `uv run`)
+- **Test execution rule**: use a hard 30-second timeout cap for each test command invocation during agent work unless a shorter cap is sufficient.
 
 ### Test Conventions
 
@@ -58,6 +59,16 @@ You design and maintain the test strategy for this PySide6 desktop application. 
 
 Write tests to `tests/`. Write test plans and coverage reports to `docs/qa/<prefix>-*.md`.
 
+## Artifact Contract
+
+Consume the spec, feature-workspace notes, relevant source artifacts, and any architecture guidance named by the Leader.
+
+Produce one or more durable outputs as appropriate:
+
+- executable tests in `tests/`
+- QA plans / validation notes / coverage reports in `docs/qa/<prefix>-*.md`
+- review summary entries in `project/<feature>/reviews.md` when delegated a review pass
+
 ## Definition of Done
 
 1. Test cases cover the requested scope with explicit setup, execution, and assertion steps.
@@ -66,6 +77,16 @@ Write tests to `tests/`. Write test plans and coverage reports to `docs/qa/<pref
 4. Regression tests are added for any bugs fixed.
 5. The output is ready to execute or hand off — tests pass with `uv run pytest`.
 6. Coverage gaps are identified and reported to the Leader.
+7. Non-trivial validation conclusions are persisted in repository artifacts, not only chat.
+
+## MessageBox Abstraction (MANDATORY FOR TESTS)
+
+- **Never monkeypatch `PySide6.QtWidgets.QMessageBox` directly in tests.** This is the root cause of test hangs.
+- **Always use the app-owned wrapper in `src/product_description_tool/message_box.py`.**
+- The wrapper provides: `set_test_mode()`, `set_response()`, `reset()`.
+- In conftest.py, enable test mode globally. Tests override specific responses via `set_response()`.
+- Tests that need specific return values must configure them through the wrapper API, not via monkeypatch.
+- The wrapper's test mode is controlled by `PRODUCT_DESCRIPTION_TOOL_TEST_MODE=1` env var or `set_test_mode(True)`.
 
 ## Rules
 
@@ -76,3 +97,6 @@ Write tests to `tests/`. Write test plans and coverage reports to `docs/qa/<pref
 5. Preserve test compatibility with pytest-qt fixtures.
 6. When testing backend logic, prefer unit tests with injected dependencies (provider_factory, prompt_renderer).
 7. When testing GUI behavior, use FakeDialog and qtbot.waitUntil() patterns from existing tests.
+8. **Use the `message_box` wrapper for all test message-box configuration. Never monkeypatch `QMessageBox` directly.**
+9. Prefer explicit command timeouts of 30 seconds or less when running tests during agent work.
+8. Tie scenarios and findings back to named artifacts so downstream reviewers can trace why the tests exist.

@@ -63,6 +63,7 @@ class GenerationWorker(QObject):
                         template=prompt.prompt,
                         config=self.config,
                         knowledge_base_dir=self.knowledge_base_dir,
+                        attachments=prompt.attachments,
                         on_prompt_ready=(
                             lambda current_row_index, prompt_payload, current_prompt=prompt: (
                                 self._emit_prompt_started(

@@ -6,12 +6,10 @@ import sys
 from pathlib import Path
 
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (
-    QMessageBox,
-    QPlainTextEdit,
-)
+from PySide6.QtWidgets import QPlainTextEdit
 
 from product_description_tool.highlighter import MarkdownSyntaxHighlighter
+from product_description_tool.message_box import warning
 
 
 def open_external(path: str) -> None:
@@ -28,7 +26,7 @@ def open_external(path: str) -> None:
         else:
             subprocess.run(["xdg-open", path], check=True)
     except Exception as exc:  # noqa: BLE001
-        QMessageBox.warning(
+        warning(
             None,
             "Open failed",
             f"Could not open '{path}':\n{exc}",

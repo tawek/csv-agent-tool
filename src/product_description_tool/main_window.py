@@ -7,13 +7,10 @@ from PySide6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
-    QFileDialog,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
     QLabel,
     QMainWindow,
-    QMessageBox,
     QMenu,
     QStyle,
     QPushButton,
@@ -25,19 +22,26 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from product_description_tool import message_box, file_dialog, input_dialog
 from product_description_tool.collapsible_panel import CollapsiblePanel, PanelState
 from product_description_tool.config import AppConfig, ConfigStore, CsvConfig, FieldConfig
 from product_description_tool.csv_repository import CsvDocument, CsvRepository
 from product_description_tool.dialogs import (
     ActivityDialog,
+    AttachmentManager,
     FilterDialog,
     HtmlEditorDialog,
     SettingsDialog,
 )
 from product_description_tool.filter_proxy import WildcardFilterProxyModel
 from product_description_tool.generation import GenerationService
+from product_description_tool.kb_conversion import ALL_KB_EXTENSIONS
 from product_description_tool.kb_editor import MarkdownEditor, open_external
 from product_description_tool.kb_window import KnowledgeBaseManager
+
+from .message_box import information, warning, critical, question, QMessageBoxStandardButton as StandardButton
+from .file_dialog import get_open_file_name, get_save_file_name, get_existing_directory
+from .input_dialog import get_text, get_int, get_double, get_item
 from product_description_tool.preview import HtmlPreview, analyze_html_content, format_html_stats
 from product_description_tool.project import Project, ProjectPrompt, ProjectRepository
 from product_description_tool.prompt_renderer import (
@@ -161,6 +165,14 @@ class MainWindow(QMainWindow):
         self.toggle_prompt_button.setCheckable(True)
         self.toggle_prompt_button.clicked.connect(self.toggle_current_prompt_enabled)
         prompt_header.addWidget(self.toggle_prompt_button)
+
+        self.attachments_button = QPushButton("Attachments\u2026")
+        self.attachments_button.clicked.connect(self._open_attachment_manager)
+        prompt_header.addWidget(self.attachments_button)
+
+        self.attachment_count_label = QLabel("")
+        self.attachment_count_label.setStyleSheet("color: gray; font-size: 11px;")
+        prompt_header.addWidget(self.attachment_count_label)
 
         self._connect_panel_buttons()
 
@@ -353,7 +365,7 @@ class MainWindow(QMainWindow):
         if not self._maybe_save_project():
             return
         self._close_kb_manager()
-        path, _ = QFileDialog.getOpenFileName(
+        path = get_open_file_name(
             self,
             "Open Project",
             str(self.project_path.parent if self.project_path else ""),
@@ -376,7 +388,7 @@ class MainWindow(QMainWindow):
             self.filter_patterns = {}
             self._sync_project_with_document()
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Open failed", str(exc))
+            critical(self, "Open failed", str(exc))
             return
         self._refresh_prompt_controls()
         self._refresh_table_from_document()
@@ -389,7 +401,7 @@ class MainWindow(QMainWindow):
     def save_project(self, save_as: bool = False) -> bool:
         target_path = None if save_as else self.project_path
         if target_path is None:
-            path, _ = QFileDialog.getSaveFileName(
+            path = get_save_file_name(
                 self,
                 "Save Project",
                 str(self.project_path or ""),
@@ -403,7 +415,7 @@ class MainWindow(QMainWindow):
         try:
             self.csv_repository.save(csv_path, self.document, self.project.csv)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Save failed", str(exc))
+            critical(self, "Save failed", str(exc))
             return False
         self.project_path = target_path
         self.config.csv = CsvConfig.from_dict(self.project.csv.to_dict())
@@ -412,7 +424,7 @@ class MainWindow(QMainWindow):
         return True
 
     def load_csv(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
+        path = get_open_file_name(
             self,
             "Import CSV",
             str(self.current_external_csv_path.parent if self.current_external_csv_path else ""),
@@ -425,7 +437,7 @@ class MainWindow(QMainWindow):
             self.current_external_csv_path = Path(path)
             self._sync_project_with_document()
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Import failed", str(exc))
+            critical(self, "Import failed", str(exc))
             return
         self._refresh_table_from_document()
         self._update_preview_field_selectors(preserve_selection=False)
@@ -474,7 +486,7 @@ class MainWindow(QMainWindow):
 
             self.csv_repository.save(target_path, export_doc, self.project.csv)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Export failed", str(exc))
+            critical(self, "Export failed", str(exc))
             return
 
         self.project.csv.export_path = str(target_path)
@@ -554,8 +566,63 @@ class MainWindow(QMainWindow):
             self._kb_manager.deleteLater()
             self._kb_manager = None
 
+    # ------------------------------------------------------------------
+    # Attachment management
+    # ------------------------------------------------------------------
+
+    def _update_attachment_summary(self) -> None:
+        prompt = self._current_prompt()
+        if prompt is None or not prompt.attachments:
+            self.attachment_count_label.setText("")
+        else:
+            count = len(prompt.attachments)
+            label = "attachment" if count == 1 else "attachments"
+            self.attachment_count_label.setText(f"{count} {label} configured")
+
+    def _gather_available_kb_files(self) -> list[str]:
+        """Return list of relative KB file paths under the project KB directory."""
+        if not self.project.knowledge_base_dir:
+            return []
+        kb_path = Path(self.project.knowledge_base_dir).resolve()
+        if not kb_path.is_dir():
+            return []
+        supported = ALL_KB_EXTENSIONS
+        files: list[str] = []
+        try:
+            for entry in kb_path.rglob("*"):
+                if entry.is_file() and entry.suffix.lower() in supported:
+                    rel = entry.relative_to(kb_path)
+                    files.append(str(rel.as_posix()))
+        except (OSError, PermissionError):
+            pass
+        return sorted(files)
+
+    def _open_attachment_manager(self) -> None:
+        prompt = self._current_prompt()
+        if prompt is None:
+            return
+        # Gather available KB files and CSV columns for the picker
+        kb_files = self._gather_available_kb_files()
+        csv_columns = list(self.document.headers)
+
+        dialog = AttachmentManager(
+            prompt_output_field=prompt.output_field,
+            attachments=prompt.attachments,
+            knowledge_base_dir=self.project.knowledge_base_dir,
+            kb_files=kb_files,
+            csv_columns=csv_columns,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        new_attachments = dialog.get_attachments()
+        if new_attachments != prompt.attachments:
+            prompt.attachments = new_attachments
+            self._set_project_modified(True)
+            self._update_attachment_summary()
+
     def add_prompt(self) -> None:
-        output_field, accepted = QInputDialog.getText(
+        output_field, accepted = get_text(
             self,
             "Add Prompt",
             "CSV output field:",
@@ -567,7 +634,7 @@ class MainWindow(QMainWindow):
             return
         existing = self._prompt_by_output_field(output_field)
         if existing is not None:
-            QMessageBox.information(
+            information(
                 self,
                 "Prompt exists",
                 f"A prompt for '{output_field}' already exists.",
@@ -586,14 +653,14 @@ class MainWindow(QMainWindow):
         prompt = self._current_prompt()
         if prompt is None:
             return
-        answer = QMessageBox.question(
+        answer = question(
             self,
             "Delete Prompt",
             f"Delete the prompt for '{prompt.output_field}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            StandardButton.Yes | StandardButton.No,
+            StandardButton.No,
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        if answer != StandardButton.Yes:
             return
         self.project.prompts.remove(prompt)
         self._refresh_prompt_controls()
@@ -632,6 +699,7 @@ class MainWindow(QMainWindow):
         self._updating_prompt_ui = True
         self.prompt_edit.setPlainText("" if prompt is None else prompt.prompt)
         self._updating_prompt_ui = False
+        self._update_attachment_summary()
         if prompt is None:
             self.toggle_prompt_button.setChecked(False)
             self.toggle_prompt_button.setText("Enabled")
@@ -664,13 +732,13 @@ class MainWindow(QMainWindow):
             return
         prompt = self._current_prompt()
         if prompt is None:
-            QMessageBox.warning(self, "No prompt", "Add or select a prompt first.")
+            warning(self, "No prompt", "Add or select a prompt first.")
             return
         if not self._validate_ready_for_generation([prompt]):
             return
         row_index = self._selected_source_row()
         if row_index is None:
-            QMessageBox.warning(self, "No selection", "Select a row to preview.")
+            warning(self, "No selection", "Select a row to preview.")
             return
         self._start_worker(prompts=[prompt], row_specs=[(row_index, self.document.rows[row_index])])
 
@@ -686,13 +754,13 @@ class MainWindow(QMainWindow):
             return
         prompts = self._enabled_prompts()
         if not prompts:
-            QMessageBox.warning(self, "No enabled prompts", "Enable at least one prompt first.")
+            warning(self, "No enabled prompts", "Enable at least one prompt first.")
             return
         if not self._validate_ready_for_generation(prompts):
             return
         prompts = PromptRenderer.compute_prompt_order(prompts)
         if not row_specs:
-            QMessageBox.warning(
+            warning(
                 self,
                 "No matching rows",
                 "No rows are available for processing in the selected scope.",
@@ -705,18 +773,18 @@ class MainWindow(QMainWindow):
     def _confirm_large_processing_run(self, row_count: int) -> bool:
         if row_count <= 10:
             return True
-        answer = QMessageBox.question(
+        answer = question(
             self,
             "Confirm processing",
             f"This run will process {row_count} rows and may take a long time. Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            StandardButton.Yes | StandardButton.No,
+            StandardButton.No,
         )
-        return answer == QMessageBox.StandardButton.Yes
+        return answer == StandardButton.Yes
 
     def _validate_ready_for_generation(self, prompts: list[ProjectPrompt]) -> bool:
         if not self.document.rows:
-            QMessageBox.warning(self, "No data", "Import or open a project CSV first.")
+            warning(self, "No data", "Import or open a project CSV first.")
             return False
         for prompt in prompts:
             try:
@@ -726,7 +794,7 @@ class MainWindow(QMainWindow):
                     knowledge_base_dir=self.project.knowledge_base_dir,
                 )
             except PromptTemplateError as exc:
-                QMessageBox.critical(
+                critical(
                     self,
                     "Invalid prompt template",
                     "\n".join(
@@ -738,12 +806,27 @@ class MainWindow(QMainWindow):
                 )
                 return False
             except KnowledgeBaseRefError as exc:
-                QMessageBox.critical(
+                critical(
                     self,
                     "Knowledge-base reference error",
                     f"Prompt '{prompt.output_field}':\n{exc}",
                 )
                 return False
+            # Validate attachment sources
+            if prompt.attachments:
+                try:
+                    self.generation_service.validate_attachments(
+                        prompt.attachments,
+                        self.document.headers,
+                        knowledge_base_dir=self.project.knowledge_base_dir,
+                    )
+                except ValueError as exc:
+                    critical(
+                        self,
+                        "Invalid attachment",
+                        f"Prompt '{prompt.output_field}':\n{exc}",
+                    )
+                    return False
         # Check for cyclic dependencies among prompts
         try:
             PromptRenderer.compute_prompt_order(prompts)
@@ -752,7 +835,7 @@ class MainWindow(QMainWindow):
             for src, dst in exc.cycle_edges:
                 edge_lines.append(f"  {src} -> {dst}")
             detail = "\n".join(edge_lines) if edge_lines else "No dependency edges detected."
-            QMessageBox.critical(
+            critical(
                 self,
                 "Cyclic dependency detected",
                 f"{exc}\n\nDependencies:\n{detail}",
@@ -829,11 +912,14 @@ class MainWindow(QMainWindow):
         prepare_prompt = getattr(self.generation_service, "prepare_prompt", None)
         if prepare_prompt is None:
             prepare_prompt = GenerationService().prepare_prompt
-        first_prompt = prepare_prompt(
+        kwargs: dict = dict(
             template=prompts[0].prompt,
             row=row_specs[0][1],
             knowledge_base_dir=self.project.knowledge_base_dir,
         )
+        if prompts[0].attachments:
+            kwargs["attachments"] = prompts[0].attachments
+        first_prompt = prepare_prompt(**kwargs)
         return (len(prompts) * len(row_specs), first_prompt.input_char_count)
 
     def _handle_prompt_started(self, row_index: int, output_field: str, input_chars: int) -> None:
@@ -889,7 +975,7 @@ class MainWindow(QMainWindow):
         self._close_activity_dialog(status="Failed", force_close=True)
         self._set_busy(False)
         self.status.showMessage("Generation failed")
-        QMessageBox.critical(self, "Generation failed", message)
+        critical(self, "Generation failed", message)
 
     def _handle_worker_completed(self) -> None:
         self._cancel_requested = False
@@ -1018,6 +1104,7 @@ class MainWindow(QMainWindow):
         self.prompt_edit.setEnabled(not self._busy and prompt is not None)
         self.delete_prompt_button.setEnabled(not self._busy and prompt is not None)
         self.toggle_prompt_button.setEnabled(not self._busy and prompt is not None)
+        self.attachments_button.setEnabled(not self._busy and prompt is not None)
         self.preview_button.setEnabled(processing_controls_enabled and prompt is not None)
         self.process_button.setEnabled(processing_controls_enabled and bool(self._enabled_prompts()))
         self.process_menu_button.setEnabled(
@@ -1053,11 +1140,11 @@ class MainWindow(QMainWindow):
 
     def edit_selected_description(self, column_name: str) -> None:
         if not column_name:
-            QMessageBox.warning(self, "No field", "Select a field first.")
+            warning(self, "No field", "Select a field first.")
             return
         row_index = self._selected_source_row()
         if row_index is None:
-            QMessageBox.warning(self, "No selection", "Select a row first.")
+            warning(self, "No selection", "Select a row first.")
             return
         self._ensure_column(column_name)
         row = self.document.rows[row_index]
@@ -1446,24 +1533,24 @@ class MainWindow(QMainWindow):
     def _maybe_save_project(self) -> bool:
         if not self._project_modified:
             return True
-        answer = QMessageBox.warning(
+        answer = warning(
             self,
             "Unsaved changes",
             "The current project has unsaved changes. Save before continuing?",
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save,
+            StandardButton.Save
+            | StandardButton.Discard
+            | StandardButton.Cancel,
+            StandardButton.Save,
         )
-        if answer == QMessageBox.StandardButton.Cancel:
+        if answer == StandardButton.Cancel:
             return False
-        if answer == QMessageBox.StandardButton.Discard:
+        if answer == StandardButton.Discard:
             return True
         return self.save_project()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._worker_thread is not None:
-            QMessageBox.warning(
+            warning(
                 self,
                 "Processing in progress",
                 "Cancel the current processing run before closing the application.",

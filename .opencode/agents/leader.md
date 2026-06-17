@@ -35,6 +35,7 @@ You are accountable for the final outcome even when specialists perform the work
 - **Run app**: `uv run product-description-tool`
 - **Run tests**: `QT_QPA_PLATFORM=offscreen PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1 uv run pytest`
 - **Build**: `uv run pyinstaller packaging/product_description_tool.spec`
+- **Test execution rule**: use a hard 30-second timeout cap for test command invocations during agent work unless a shorter cap is sufficient.
 
 ## Specialists Available
 
@@ -63,7 +64,7 @@ You are accountable for the final outcome even when specialists perform the work
 2. **Check dependency order** — if shared interfaces, persisted shapes, repo boundaries, or spec-driven behavior changes are involved, use Code Architect first.
 3. **Enforce source serialization** — for changes under `src/product_description_tool/`, assign exactly one code-writing agent at a time.
 4. **Gather context** — read relevant files, specs, TODOs via Code Explorer if needed.
-5. **Construct the task prompt** with context, artifact scope, and the specialist's role-specific Definition of Done.
+5. **Construct the task prompt** with context, explicit input artifacts to consume, explicit output artifacts to produce or update, and the specialist's role-specific Definition of Done.
 6. **Delegate via the `task` tool.**
 7. **Track progress in `todowrite`.**
 8. **Only start dependent work after upstream artifacts are ready.** QA may work in parallel only after the intended behavior and source-facing contracts are stable enough to test.
@@ -78,6 +79,30 @@ You are accountable for the final outcome even when specialists perform the work
 12. **Run the architect review gate when required.** After implementation and validation, send architecturally significant source changes to Code Architect for a post-implementation review before final user reporting.
 13. **Approve or reject implementation.** If a Code Architect was used, the Code Architect performs the approval check for architectural fitness, but you remain accountable for the final integrated result.
 14. **Report back** to the user, including the current action register and the status of any deferred follow-ups. If no findings remain, explicitly say the action register is closed.
+15. **Prevent blocked GUI validation.** Ensure any delegated test or validation flow stubs/fakes message boxes or other modal dialogs that could block unattended execution.
+
+## Artifact-Driven Delegation
+
+Default to **artifact in -> artifact out** specialist work.
+
+- Before delegating, identify which repository artifact is the source of truth for the task.
+- Ask specialists to read named files, not just the prompt text.
+- Ask specialists to write or update named git-tracked artifacts whenever the result affects product behavior, architecture, tests, UX, reviews, or future handoff.
+- Prefer durable artifacts over tell-tale-only chat summaries.
+
+### Standard artifact locations
+
+- Request / intent: `project/<feature>/implementation-notes.md` or `project/<feature>/request.md`
+- Status: `project/<feature>/status.md`
+- Action register: `project/<feature>/action-register.md`
+- Reviews: `project/<feature>/reviews.md`
+- Spec: `docs/specification.md`
+- Architecture: `docs/architecture/<prefix>-*.md`
+- QA reports: `docs/qa/<prefix>-*.md`
+- Analysis: `docs/analysis/<prefix>-*.md`
+- Mockups: `project/<feature>/mockups/*.md`
+
+When a specialist returns only a chat answer for work that should have produced a durable artifact, treat the output as incomplete and re-delegate.
 
 Architect review is required when any of the following apply:
 - The implementation spans multiple source modules in `src/product_description_tool/`.
@@ -92,14 +117,15 @@ Architect review is usually not required for a trivial isolated change that stay
 2. Artifact order and dependency constraints were identified before delegation.
 3. No overlapping code-writing tasks were run concurrently against `src/product_description_tool/`.
 4. Each delegated task included enough context and an explicit role-specific Definition of Done.
-5. Returned specialist work was reviewed for completeness, coherence, and usefulness.
-6. Incomplete or incoherent specialist output was rejected and corrected through re-delegation.
-7. Review findings from specialists were tracked in an explicit action register in `todowrite`, a git-tracked per-feature workspace under `project/<feature>/`, and the user-facing report, and each item has a disposition.
-8. The final assembled outcome is consistent across code, specs, tests, analysis, and user-facing explanation as applicable.
-9. Required post-implementation architect review has been completed before final user reporting.
-10. Verification focused on integration, quality, and global-goal alignment has been completed.
-11. The final response to the user accurately reflects the real state of the work, including any remaining gaps and deferred follow-ups.
-12. All changes follow the spec-first workflow.
+5. Each non-trivial delegated task identified concrete input artifacts and required output artifacts.
+6. Returned specialist work was reviewed for completeness, coherence, and usefulness.
+7. Incomplete or incoherent specialist output was rejected and corrected through re-delegation.
+8. Review findings from specialists were tracked in an explicit action register in `todowrite`, a git-tracked per-feature workspace under `project/<feature>/`, and the user-facing report, and each item has a disposition.
+9. The final assembled outcome is consistent across code, specs, tests, analysis, mockups, and user-facing explanation as applicable.
+10. Required post-implementation architect review has been completed before final user reporting.
+11. Verification focused on integration, quality, and global-goal alignment has been completed.
+12. The final response to the user accurately reflects the real state of the work, including any remaining gaps and deferred follow-ups.
+13. All changes follow the spec-first workflow.
 
 ## Project Domain Knowledge
 
@@ -153,3 +179,4 @@ Architect review is usually not required for a trivial isolated change that stay
 10. The Action Register format is mandatory: **ID**, **Source**, **Finding**, **Disposition**, **Owner**, **Target**, **Status**. Use one row or bullet per finding and update it every time a review or implementation changes the state.
 11. Prefer one git-tracked workspace per feature or sprint at `project/<feature>/` instead of accumulating unrelated work in a single `TODO.md`.
 12. For UI-heavy work, proactively use `@mockup-gui-designer` after spec stabilization and before or alongside implementation planning so developers receive a concrete UX artifact.
+13. Generally require specialists to consume and produce durable git-tracked artifacts rather than leaving important decisions only in chat.

@@ -1,6 +1,10 @@
 import pytest
 from pathlib import Path
 
+from product_description_tool.kb_conversion import (
+    ALL_KB_EXTENSIONS,
+    DIRECT_READ_EXTENSIONS,
+)
 from product_description_tool.prompt_renderer import (
     CycleError,
     KnowledgeBaseRefError,
@@ -9,6 +13,15 @@ from product_description_tool.prompt_renderer import (
     SUPPORTED_KB_EXTENSIONS,
 )
 from product_description_tool.project import ProjectPrompt
+
+
+def test_supported_kb_extensions_includes_txt() -> None:
+    assert ".txt" in SUPPORTED_KB_EXTENSIONS
+    assert ".txt" in DIRECT_READ_EXTENSIONS
+
+
+def test_supported_kb_extensions_matches_all_kb() -> None:
+    assert SUPPORTED_KB_EXTENSIONS == ALL_KB_EXTENSIONS
 
 
 def test_extracts_unique_placeholders() -> None:
@@ -190,15 +203,29 @@ class TestKnowledgeBaseRefs:
         errors = exc_info.value.errors
         assert any("file not found" in e for e in errors)
 
-    def test_validate_raises_for_unsupported_extension(self, tmp_path: Path) -> None:
+    def test_validate_succeeds_for_txt_kb_file(self, tmp_path: Path) -> None:
+        """txt files are now supported as direct-read KB references."""
         kb_dir = tmp_path / "kb"
         kb_dir.mkdir()
         (kb_dir / "notes.txt").write_text("hello", encoding="utf-8")
 
         renderer = PromptRenderer()
+        # Should not raise
+        renderer.validate(
+            "Use {{@notes.txt}}",
+            ["title"],
+            knowledge_base_dir=str(kb_dir),
+        )
+
+    def test_validate_raises_for_unsupported_extension(self, tmp_path: Path) -> None:
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+        (kb_dir / "script.py").write_text("x = 1", encoding="utf-8")
+
+        renderer = PromptRenderer()
         with pytest.raises(KnowledgeBaseRefError) as exc_info:
             renderer.validate(
-                "Use {{@notes.txt}}",
+                "Use {{@script.py}}",
                 ["title"],
                 knowledge_base_dir=str(kb_dir),
             )
@@ -266,6 +293,20 @@ class TestKnowledgeBaseRefs:
         )
         assert "Alpha" in result
         assert "Beta" in result
+
+    def test_render_substitutes_txt_kb_ref(self, tmp_path: Path) -> None:
+        """txt files are now supported as direct-read KB references."""
+        kb_dir = tmp_path / "kb"
+        kb_dir.mkdir()
+        (kb_dir / "notes.txt").write_text("Some notes here.", encoding="utf-8")
+
+        renderer = PromptRenderer()
+        result = renderer.render(
+            "Content: {{@notes.txt}}",
+            {},
+            knowledge_base_dir=str(kb_dir),
+        )
+        assert "Some notes here." in result
 
     def test_render_preserves_field_placeholders_without_kb(self) -> None:
         """When no KB dir is given, field placeholders still work."""

@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QInputDialog, QMessageBox, QTableWidgetItem
+from PySide6.QtWidgets import QDialog, QMessageBox, QTableWidgetItem
 
+from product_description_tool import message_box, input_dialog
 from product_description_tool.kb_csv_editor import CsvEditorDialog, _detect_csv_dialect
 
 
@@ -143,19 +144,13 @@ def test_csv_editor_is_modal(qtbot, sample_csv: Path) -> None:
     assert dialog.isModal()
 
 
-def test_csv_editor_rejects_on_unreadable_file(qtbot, tmp_path: Path, monkeypatch) -> None:
-    """The dialog rejects when the file cannot be read.
-
-    We monkeypatch QMessageBox.critical to prevent blocking in headless mode.
-    """
-    # The constructor shows a critical message box on failure; suppress it.
-    monkeypatch.setattr(
-        "product_description_tool.kb_csv_editor.QMessageBox.critical",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Ok,
-    )
+def test_csv_editor_rejects_on_unreadable_file(qtbot, tmp_path: Path) -> None:
+    """The dialog rejects when the file cannot be read."""
+    message_box.set_response("critical", QMessageBox.StandardButton.Ok)
     missing = tmp_path / "nonexistent.csv"
     dialog = CsvEditorDialog(missing)
     qtbot.addWidget(dialog)
+    message_box.reset()
     # The dialog calls reject() in constructor when _load_file fails
     assert dialog.result() == QDialog.Rejected
 
@@ -243,7 +238,7 @@ def test_remove_row_removes_selected_row(qtbot, sample_csv: Path) -> None:
     assert dialog._table.rowCount() == initial_count - 1
 
 
-def test_remove_row_with_no_selection_shows_info(qtbot, sample_csv: Path, monkeypatch) -> None:
+def test_remove_row_with_no_selection_shows_info(qtbot, sample_csv: Path) -> None:
     dialog = CsvEditorDialog(sample_csv)
     qtbot.addWidget(dialog)
 
@@ -253,7 +248,7 @@ def test_remove_row_with_no_selection_shows_info(qtbot, sample_csv: Path, monkey
         info_messages.append((title, text))
         return QMessageBox.StandardButton.Ok
 
-    monkeypatch.setattr(QMessageBox, "information", fake_info)
+    message_box.set_response("information", fake_info)
 
     # Ensure no row is selected
     dialog._table.clearSelection()
@@ -261,6 +256,7 @@ def test_remove_row_with_no_selection_shows_info(qtbot, sample_csv: Path, monkey
 
     dialog._remove_row()
 
+    message_box.reset()
     assert len(info_messages) == 1
     assert "No row selected" in info_messages[0][0]
 
@@ -275,13 +271,11 @@ def test_add_column_prompts_for_name_and_adds(qtbot, sample_csv: Path, monkeypat
 
     initial_cols = dialog._table.columnCount()
 
-    monkeypatch.setattr(
-        QInputDialog,
-        "getText",
-        lambda *args, **kwargs: ("new_col", True),
-    )
+    input_dialog.set_response("getText", ("new_col", True))
 
     dialog._add_column()
+
+    input_dialog.reset()
 
     assert dialog._table.columnCount() == initial_cols + 1
     header = dialog._table.horizontalHeaderItem(initial_cols)
@@ -295,13 +289,11 @@ def test_add_column_rejects_empty_name(qtbot, sample_csv: Path, monkeypatch) -> 
 
     initial_cols = dialog._table.columnCount()
 
-    monkeypatch.setattr(
-        QInputDialog,
-        "getText",
-        lambda *args, **kwargs: ("", True),
-    )
+    input_dialog.set_response("getText", ("", True))
 
     dialog._add_column()
+
+    input_dialog.reset()
 
     assert dialog._table.columnCount() == initial_cols
 
@@ -318,38 +310,33 @@ def test_add_column_rejects_duplicate_header(qtbot, sample_csv: Path, monkeypatc
         warning_messages.append((title, text))
         return QMessageBox.StandardButton.Ok
 
-    monkeypatch.setattr(QMessageBox, "warning", fake_warning)
-    monkeypatch.setattr(
-        QInputDialog,
-        "getText",
-        lambda *args, **kwargs: ("sku", True),
-    )
+    message_box.set_response("warning", fake_warning)
+    input_dialog.set_response("getText", ("sku", True))
 
     dialog._add_column()
 
+    message_box.reset()
+    input_dialog.reset()
     assert dialog._table.columnCount() == initial_cols
     assert len(warning_messages) == 1
     assert "Duplicate header" in warning_messages[0][0]
 
 
 def test_remove_column_removes_selected_column_after_confirmation(
-    qtbot, sample_csv: Path, monkeypatch
+    qtbot, sample_csv: Path
 ) -> None:
     dialog = CsvEditorDialog(sample_csv)
     qtbot.addWidget(dialog)
 
     initial_cols = dialog._table.columnCount()
 
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
-    )
+    message_box.set_response("question", QMessageBox.StandardButton.Yes)
 
     # Select column 1
     dialog._table.setCurrentCell(0, 1)
     dialog._remove_column()
 
+    message_box.reset()
     assert dialog._table.columnCount() == initial_cols - 1
     # Verify header "name" is gone
     new_headers = [
@@ -360,7 +347,7 @@ def test_remove_column_removes_selected_column_after_confirmation(
     assert "name" not in new_headers
 
 
-def test_remove_column_no_selection_shows_info(qtbot, sample_csv: Path, monkeypatch) -> None:
+def test_remove_column_no_selection_shows_info(qtbot, sample_csv: Path) -> None:
     dialog = CsvEditorDialog(sample_csv)
     qtbot.addWidget(dialog)
 
@@ -370,31 +357,29 @@ def test_remove_column_no_selection_shows_info(qtbot, sample_csv: Path, monkeypa
         info_messages.append((title, text))
         return QMessageBox.StandardButton.Ok
 
-    monkeypatch.setattr(QMessageBox, "information", fake_info)
+    message_box.set_response("information", fake_info)
     dialog._table.setCurrentCell(-1, -1)
 
     dialog._remove_column()
 
+    message_box.reset()
     assert len(info_messages) == 1
     assert "No column selected" in info_messages[0][0]
 
 
-def test_remove_column_cancelled_by_user(qtbot, sample_csv: Path, monkeypatch) -> None:
+def test_remove_column_cancelled_by_user(qtbot, sample_csv: Path) -> None:
     """User says No to column removal confirmation: column stays."""
     dialog = CsvEditorDialog(sample_csv)
     qtbot.addWidget(dialog)
 
     initial_cols = dialog._table.columnCount()
 
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.No,
-    )
+    message_box.set_response("question", QMessageBox.StandardButton.No)
 
     dialog._table.setCurrentCell(0, 1)
     dialog._remove_column()
 
+    message_box.reset()
     assert dialog._table.columnCount() == initial_cols
 
 
@@ -499,21 +484,18 @@ def test_add_row_then_save_includes_new_row(qtbot, sample_csv: Path) -> None:
     assert "Doohickey" in saved
 
 
-def test_remove_column_then_save_excludes_column(qtbot, sample_csv: Path, monkeypatch) -> None:
+def test_remove_column_then_save_excludes_column(qtbot, sample_csv: Path) -> None:
     """Removing a column and saving drops it from the file."""
     dialog = CsvEditorDialog(sample_csv)
     qtbot.addWidget(dialog)
 
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
-    )
+    message_box.set_response("question", QMessageBox.StandardButton.Yes)
 
     # Remove "price" column (index 2)
     dialog._table.setCurrentCell(0, 2)
     dialog._remove_column()
 
+    message_box.reset()
     dialog._save_file()
 
     saved = sample_csv.read_text(encoding="utf-8-sig")
@@ -527,17 +509,14 @@ def test_add_column_then_save_includes_new_column(qtbot, sample_csv: Path, monke
     dialog = CsvEditorDialog(sample_csv)
     qtbot.addWidget(dialog)
 
-    monkeypatch.setattr(
-        QInputDialog,
-        "getText",
-        lambda *args, **kwargs: ("in_stock", True),
-    )
+    input_dialog.set_response("getText", ("in_stock", True))
 
     dialog._add_column()
     # Fill the new column for existing rows
     dialog._table.setItem(0, 3, QTableWidgetItem("yes"))
     dialog._table.setItem(1, 3, QTableWidgetItem("no"))
 
+    input_dialog.reset()
     dialog._save_file()
 
     saved = sample_csv.read_text(encoding="utf-8-sig")

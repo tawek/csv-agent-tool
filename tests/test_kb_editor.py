@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 from PySide6.QtWidgets import QMessageBox, QPlainTextEdit
 
+from product_description_tool import message_box
 from product_description_tool.highlighter import MarkdownSyntaxHighlighter
 from product_description_tool.kb_editor import MarkdownEditor, open_external
 
@@ -131,10 +132,11 @@ def test_open_external_linux_failure_shows_warning(monkeypatch) -> None:
         warning_messages.append((args, kwargs))
         return QMessageBox.StandardButton.Ok
 
-    monkeypatch.setattr(QMessageBox, "warning", fake_warning)
+    message_box.set_response("warning", fake_warning)
 
     open_external("/nonexistent/file.txt")
 
+    message_box.reset()
     assert len(warning_messages) >= 1
     title_text = warning_messages[0][0]
     combined = " ".join(str(t) for t in title_text)

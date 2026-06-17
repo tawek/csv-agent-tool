@@ -28,7 +28,7 @@ uv run product-description-tool
 Run the test suite headlessly:
 
 ```bash
-QT_QPA_PLATFORM=offscreen PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1 uv run pytest
+./scripts/pytest.sh
 ```
 
 Build the packaged desktop app:
@@ -58,6 +58,7 @@ uv run pyinstaller packaging/product_description_tool.spec
 - `docs/`: capability-specific documentation for future agents and maintainers.
 - `docs/project.md`: current reference for the application project model and lifecycle.
 - `docs/build-windows.md`: complete procedure for building Windows executables via SSH remote machine.
+- `docs/kb/`: project knowledge base for durable governance, development, UI, and resolved-problem guidance.
 
 When a feature needs deeper explanation than a short README note, add or extend a focused document under `docs/`.
 
@@ -66,6 +67,12 @@ When a feature needs deeper explanation than a short README note, add or extend 
 - Prefer `uv run ...` for all local commands.
 - Keep GUI-related changes covered by tests where possible, especially in `tests/test_main_window.py`.
 - Preserve headless test behavior. The suite expects `QT_QPA_PLATFORM=offscreen` and `PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1`.
+- Never run raw `pytest` directly during agent work.
+- Always run tests through `./scripts/pytest.sh`, which is the single approved pytest entry point for this repository.
+- `./scripts/pytest.sh` enforces the required headless environment and a hard 5-second timeout for each pytest invocation.
+- Treat any direct `uv run pytest`, `pytest`, or ad hoc timeout-wrapped pytest command as a process violation unless the user explicitly instructs otherwise.
+- Prefer narrowly scoped pytest invocations through the wrapper, for example `./scripts/pytest.sh tests/test_kb_window.py` or `./scripts/pytest.sh tests/test_main_window.py -k attachments`.
+- GUI tests and GUI-related validation must ensure message boxes are stubbed or faked so modal dialogs cannot block unattended test execution.
 - Treat `build/`, `dist/`, `*.egg-info/`, `__pycache__/`, and `.pytest_cache/` as generated artifacts. Do not edit them.
 - Keep project file compatibility stable. `project.py` writes `.project.json` files plus prompt sidecars, and `config.py` serializes specific JSON keys.
 - Provider changes should preserve streaming and cancellation behavior for both Ollama and OpenAI-compatible endpoints.
@@ -76,6 +83,39 @@ When a feature needs deeper explanation than a short README note, add or extend 
 ### Golden Rule
 
 Follow the spec-first workflow for any feature, bug fix, or behavior change. Keep the user informed with concise progress updates, but do not require mandatory approval gates between spec, implementation, commit, and push unless the user explicitly asks for review pauses.
+
+### Artifact-Driven Delegation Rule
+
+Treat specialist work as **artifact in -> artifact out** by default.
+
+- Delegations should name the input artifact(s) the specialist must consume.
+- Delegations should name the output artifact(s) the specialist must produce or update.
+- Output artifacts should be persistent, git-tracked files whenever the work is more than a fleeting lookup or one-off clarification.
+- Verbal-only handoffs are allowed for small exploratory questions, but any decision, design, review, or implementation-driving conclusion should be recorded in a durable repository artifact.
+
+### Standard Artifact Kinds
+
+| Kind | Location | Purpose | Minimum contents |
+|------|----------|---------|------------------|
+| Request / intent note | `project/<feature>/implementation-notes.md` or `project/<feature>/request.md` | Anchor the user's intent for all specialists | requested behaviors, constraints, non-goals, relevant context |
+| Status tracker | `project/<feature>/status.md` | Track current phase and next steps | current state, active step, blockers, next actions |
+| Action register | `project/<feature>/action-register.md` | Track review findings and dispositions | entries with **ID**, **Source**, **Finding**, **Disposition**, **Owner**, **Target**, **Status** |
+| Review log | `project/<feature>/reviews.md` | Record architect / QA / problem-analysis review outcomes | review date/context, reviewed artifacts, findings summary, decision |
+| Specification artifact | `docs/specification.md` | Define external behavior | Use Case updates, invariants, behavior expectations |
+| Architecture artifact | `docs/architecture/<prefix>-*.md` | Describe design, boundaries, contracts, tradeoffs | problem statement, constraints, decisions, implications, open questions |
+| QA artifact | `docs/qa/<prefix>-*.md` | Capture test strategy, coverage, or validation notes | scope, scenarios, gaps, pass/fail summary |
+| Problem analysis artifact | `docs/analysis/<prefix>-*.md` | Capture bug/root-cause analysis | symptoms, evidence, hypotheses, root cause, recommended fix |
+| UX mockup artifact | `project/<feature>/mockups/*.md` | Provide developer-facing UI design inputs | layout, controls, actions, states, interaction notes |
+| Source artifact | `src/product_description_tool/**/*.py`, `packaging/**/*.spec` | Product implementation | code changes matching approved spec/design artifacts |
+| Test artifact | `tests/**/*.py` | Executable verification | deterministic tests tied to behavior/spec |
+
+### Artifact Requirements by Work Type
+
+- **Behavior change / feature / bug fix**: request note -> spec artifact -> implementation artifact -> test artifact -> validation record, with action register updates as needed.
+- **Architecture / design work**: request note -> architecture artifact (and spec artifact if behavior is affected) -> downstream implementation handoff.
+- **QA review**: consume spec + source/test artifacts, produce test artifact and/or QA artifact, and record findings in the action register.
+- **Root-cause analysis**: consume failing artifacts/evidence, produce a problem analysis artifact with a concrete handoff.
+- **UX design**: consume request/spec artifacts, produce mockup artifacts under the feature workspace.
 
 ### Workflow Steps
 
@@ -90,6 +130,7 @@ Follow the spec-first workflow for any feature, bug fix, or behavior change. Kee
    - For bug fixes: update the relevant Use Case to describe the *correct* behavior.
    - For behavior modifications: update the affected Use Case(s).
 4. **Present or summarize the spec changes** to the user before or alongside implementation work, depending on the task flow. Do not skip the spec update when one is required.
+5. **Reference produced artifacts explicitly** in downstream delegations so each specialist consumes durable repository context rather than an informal summary alone.
 
 #### Step 2: Implement
 
@@ -99,10 +140,11 @@ Follow the spec-first workflow for any feature, bug fix, or behavior change. Kee
 2. **Write or update tests.** Cover the new or modified behavior, especially in `tests/test_main_window.py`.
 3. **Run validation:**
     ```bash
-    QT_QPA_PLATFORM=offscreen PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1 uv run pytest
+    ./scripts/pytest.sh
     ```
 4. **Track review follow-ups explicitly.** When QA, Architect, or another specialist reports findings, record them in an action register and assign each one a disposition: fix now, defer, reject, or monitor. Do not treat the review as closed until every finding has a disposition.
 5. **Show or summarize the code changes** and test results to the user. Reference the Use Case numbers and spec sections the implementation satisfies, and include any open or deferred follow-up items.
+6. **Persist non-trivial verification outputs.** When a validation run produces important scope, failure, or coverage information, store or summarize it in a git-tracked QA or feature-workspace artifact instead of relying only on chat output.
 
 #### Action Register Procedure
 
@@ -185,7 +227,14 @@ This ensures the spec always reflects the desired behavior, not whatever is curr
 For most code changes, run:
 
 ```bash
-QT_QPA_PLATFORM=offscreen PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1 uv run pytest
+./scripts/pytest.sh
+```
+
+For targeted runs, still use the wrapper, for example:
+
+```bash
+./scripts/pytest.sh tests/test_prompt_renderer.py
+./scripts/pytest.sh tests/test_main_window.py -k kb
 ```
 
 For packaging-related changes, also run:
@@ -246,6 +295,17 @@ The `leader` agent has direct authority to define and maintain team coordination
 - **QA reports**: `docs/qa/<prefix>-*.md`
 - **Feature workspaces**: `project/<feature>/` containing scoped planning and review artifacts such as `action-register.md`, `reviews.md`, `implementation-notes.md`, and `status.md`
 - **UI mockups**: `project/<feature>/mockups/` containing markdown mockups that translate approved specs into developer-facing UX layouts
+
+### Artifact-Driven Specialist Contract
+
+All specialists should normally operate on named repository artifacts.
+
+- **Leader** delegates by naming input artifacts and required output artifacts.
+- **Specialists** should prefer updating or creating persistent files over returning purely conversational conclusions when the work affects decisions, implementation, review, or handoff.
+- **Downstream specialists** should consume the produced artifacts directly rather than relying only on the Leader's paraphrase.
+- **Ephemeral chat-only output** is acceptable for small codebase lookups, but not for contract-setting decisions, implementation plans, review decisions, or bug diagnoses that need to survive the session.
+
+When creating a new persistent artifact, prefer the standard locations in this file unless the task explicitly calls for another git-tracked path.
 
 ### Mockup GUI Designer
 

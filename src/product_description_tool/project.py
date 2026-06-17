@@ -13,19 +13,45 @@ PROJECT_SUFFIX = ".project.json"
 
 
 @dataclass(slots=True)
+class PromptAttachment:
+    source_type: str  # "kb_file" or "csv_column"
+    source: str  # KB relative path or CSV column name
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "PromptAttachment":
+        return cls(
+            source_type=data.get("source-type", "csv_column"),
+            source=data.get("source", ""),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source-type": self.source_type,
+            "source": self.source,
+        }
+
+
+@dataclass(slots=True)
 class ProjectPrompt:
     output_field: str
     prompt: str = ""
     enabled: bool = True
     prompt_file: str | None = None
+    attachments: list[PromptAttachment] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProjectPrompt":
+        raw_attachments = data.get("attachments", [])
+        if isinstance(raw_attachments, list):
+            attachments = [PromptAttachment.from_dict(a) for a in raw_attachments]
+        else:
+            attachments = []
         return cls(
             output_field=data.get("output-field", "").strip(),
             prompt=data.get("prompt", ""),
             enabled=bool(data.get("enabled", True)),
             prompt_file=data.get("prompt-file"),
+            attachments=attachments,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -36,6 +62,8 @@ class ProjectPrompt:
         }
         if self.prompt_file:
             payload["prompt-file"] = self.prompt_file
+        if self.attachments:
+            payload["attachments"] = [att.to_dict() for att in self.attachments]
         return payload
 
 

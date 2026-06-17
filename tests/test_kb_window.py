@@ -6,13 +6,13 @@ import pytest
 from PySide6.QtCore import Qt, QModelIndex
 from PySide6.QtWidgets import (
     QDialog,
-    QFileDialog,
     QFileSystemModel,
-    QInputDialog,
     QMessageBox,
     QTreeView,
 )
 
+from product_description_tool import message_box, input_dialog, file_dialog
+from product_description_tool.kb_editor import MarkdownEditor
 from product_description_tool.kb_window import KnowledgeBaseManager
 
 
@@ -87,11 +87,7 @@ class TestDirectoryManagement:
         kb_path = tmp_path / "new_kb"
         kb_path.mkdir()
 
-        monkeypatch.setattr(
-            QFileDialog,
-            "getExistingDirectory",
-            lambda *args, **kwargs: str(kb_path),
-        )
+        file_dialog.set_response("getExistingDirectory", str(kb_path))
 
         emitted = []
 
@@ -113,11 +109,7 @@ class TestDirectoryManagement:
         window = KnowledgeBaseManager(kb_directory=None)
         qtbot.addWidget(window)
 
-        monkeypatch.setattr(
-            QFileDialog,
-            "getExistingDirectory",
-            lambda *args, **kwargs: "",
-        )
+        file_dialog.set_response("getExistingDirectory", "")
 
         emitted = []
 
@@ -229,10 +221,11 @@ class TestDirectoryManagement:
             info_messages.append((title, text))
             return QMessageBox.StandardButton.Ok
 
-        monkeypatch.setattr(QMessageBox, "information", fake_info)
+        message_box.set_response("information", fake_info)
 
         window._open_in_explorer()
 
+        message_box.reset()
         assert len(info_messages) == 1
         assert "No directory" in info_messages[0][0]
 
@@ -257,14 +250,11 @@ class TestFileOperations:
             window._tree.selectionModel().SelectionFlag.Select,
         )
 
-        monkeypatch.setattr(
-            QInputDialog,
-            "getText",
-            lambda *args, **kwargs: ("faq_copy.md", True),
-        )
+        input_dialog.set_response("getText", ("faq_copy.md", True))
 
         window._copy_selected()
 
+        input_dialog.reset()
         assert (kb_dir / "faq_copy.md").exists()
 
     def test_copy_file_cancelled_does_nothing(self, qtbot, kb_dir: Path, monkeypatch) -> None:
@@ -278,13 +268,11 @@ class TestFileOperations:
             window._tree.selectionModel().SelectionFlag.Select,
         )
 
-        monkeypatch.setattr(
-            QInputDialog,
-            "getText",
-            lambda *args, **kwargs: ("faq_copy.md", False),
-        )
+        input_dialog.set_response("getText", ("faq_copy.md", False))
 
         window._copy_selected()
+
+        input_dialog.reset()
 
         assert not (kb_dir / "faq_copy.md").exists()
 
@@ -299,14 +287,11 @@ class TestFileOperations:
             window._tree.selectionModel().SelectionFlag.Select,
         )
 
-        monkeypatch.setattr(
-            QInputDialog,
-            "getText",
-            lambda *args, **kwargs: ("renamed_faq.md", True),
-        )
+        input_dialog.set_response("getText", ("renamed_faq.md", True))
 
         window._rename_selected()
 
+        input_dialog.reset()
         assert not (kb_dir / "faq.md").exists()
         assert (kb_dir / "renamed_faq.md").exists()
 
@@ -322,13 +307,11 @@ class TestFileOperations:
         )
 
         # Confirm deletion
-        monkeypatch.setattr(
-            QMessageBox,
-            "question",
-            lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
-        )
+        message_box.set_response("question", QMessageBox.StandardButton.Yes)
 
         window._delete_selected()
+
+        message_box.reset()
 
         assert not (kb_dir / "faq.md").exists()
 
@@ -365,11 +348,7 @@ class TestFileOperations:
         sel.select(faq_index, sel.SelectionFlag.Select)
         sel.select(notes_index, sel.SelectionFlag.Select | sel.SelectionFlag.Rows)
 
-        monkeypatch.setattr(
-            QMessageBox,
-            "question",
-            lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
-        )
+        message_box.set_response("question", QMessageBox.StandardButton.Yes)
 
         window._delete_selected()
 
@@ -491,7 +470,7 @@ class TestBoundaryEnforcement:
             critical_messages.append((title, text))
             return QMessageBox.StandardButton.Ok
 
-        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+        message_box.set_response("critical", fake_critical)
 
         # Select the file normally, then replace the selected path with an escape
         # by directly calling _edit_selected which reads from _selected_single_path.
@@ -503,6 +482,7 @@ class TestBoundaryEnforcement:
 
         window._edit_selected()
 
+        message_box.reset()
         assert len(critical_messages) == 1
         assert "Access denied" in critical_messages[0][0]
 
@@ -517,7 +497,7 @@ class TestBoundaryEnforcement:
             critical_messages.append((title, text))
             return QMessageBox.StandardButton.Ok
 
-        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+        message_box.set_response("critical", fake_critical)
 
         def fake_selected():
             return str(tmp_path / "outside.txt")
@@ -526,6 +506,7 @@ class TestBoundaryEnforcement:
 
         window._copy_selected()
 
+        message_box.reset()
         assert len(critical_messages) == 1
         assert "Access denied" in critical_messages[0][0]
 
@@ -540,7 +521,7 @@ class TestBoundaryEnforcement:
             critical_messages.append((title, text))
             return QMessageBox.StandardButton.Ok
 
-        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+        message_box.set_response("critical", fake_critical)
 
         def fake_selected():
             return str(tmp_path / "outside.txt")
@@ -549,6 +530,7 @@ class TestBoundaryEnforcement:
 
         window._rename_selected()
 
+        message_box.reset()
         assert len(critical_messages) == 1
         assert "Access denied" in critical_messages[0][0]
 
@@ -572,17 +554,14 @@ class TestBoundaryEnforcement:
             critical_messages.append((title, text))
             return QMessageBox.StandardButton.Ok
 
-        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+        message_box.set_response("critical", fake_critical)
 
         # User enters a path-traversal name
-        monkeypatch.setattr(
-            QInputDialog,
-            "getText",
-            lambda *args, **kwargs: ("../outside_copy.txt", True),
-        )
+        input_dialog.set_response("getText", ("../outside_copy.txt", True))
 
         window._copy_selected()
 
+        input_dialog.reset()
         # Must show Access denied — destination escapes KB root
         assert len(critical_messages) == 1
         assert "Access denied" in critical_messages[0][0]
@@ -609,17 +588,14 @@ class TestBoundaryEnforcement:
             critical_messages.append((title, text))
             return QMessageBox.StandardButton.Ok
 
-        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+        message_box.set_response("critical", fake_critical)
 
         # User enters a path-traversal name
-        monkeypatch.setattr(
-            QInputDialog,
-            "getText",
-            lambda *args, **kwargs: ("../renamed_escape.md", True),
-        )
+        input_dialog.set_response("getText", ("../renamed_escape.md", True))
 
         window._rename_selected()
 
+        input_dialog.reset()
         # Must show Access denied — destination escapes KB root
         assert len(critical_messages) == 1
         assert "Access denied" in critical_messages[0][0]
@@ -641,21 +617,18 @@ class TestBoundaryEnforcement:
             critical_messages.append((title, text))
             return QMessageBox.StandardButton.Ok
 
-        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+        message_box.set_response("critical", fake_critical)
 
         def fake_paths():
             return [str(tmp_path / "outside.txt")]
 
         monkeypatch.setattr(window, "_selected_paths", fake_paths)
 
-        monkeypatch.setattr(
-            QMessageBox,
-            "question",
-            lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
-        )
+        message_box.set_response("question", QMessageBox.StandardButton.Yes)
 
         window._delete_selected()
 
+        message_box.reset()
         assert len(critical_messages) == 1
         assert "Access denied" in critical_messages[0][0]
 
@@ -682,14 +655,11 @@ class TestExplorerRefresh:
             window._tree.selectionModel().SelectionFlag.Select,
         )
 
-        monkeypatch.setattr(
-            QInputDialog,
-            "getText",
-            lambda *args, **kwargs: ("renamed_faq.md", True),
-        )
+        input_dialog.set_response("getText", ("renamed_faq.md", True))
 
         window._rename_selected()
 
+        input_dialog.reset()
         # After rename, the old file should not be visible via the model
         # (the tree is rebuilt)
         # The old path should no longer exist on disk
@@ -711,17 +681,14 @@ class TestExplorerRefresh:
             window._tree.selectionModel().SelectionFlag.Select,
         )
 
-        monkeypatch.setattr(
-            QInputDialog,
-            "getText",
-            lambda *args, **kwargs: ("faq_copy.md", True),
-        )
+        input_dialog.set_response("getText", ("faq_copy.md", True))
 
         window._copy_selected()
 
+        input_dialog.reset()
         assert (kb_dir / "faq_copy.md").is_file()
 
-    def test_delete_refreshes_tree(self, qtbot, kb_dir: Path, monkeypatch) -> None:
+    def test_delete_refreshes_tree(self, qtbot, kb_dir: Path) -> None:
         """After delete, the file is removed and tree is rebuilt."""
         window = KnowledgeBaseManager(kb_directory=str(kb_dir))
         qtbot.addWidget(window)
@@ -732,14 +699,11 @@ class TestExplorerRefresh:
             window._tree.selectionModel().SelectionFlag.Select,
         )
 
-        monkeypatch.setattr(
-            QMessageBox,
-            "question",
-            lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
-        )
+        message_box.set_response("question", QMessageBox.StandardButton.Yes)
 
         window._delete_selected()
 
+        message_box.reset()
         assert not (kb_dir / "faq.md").exists()
 
     def test_refresh_kb_root_sets_directory(self, qtbot, kb_dir: Path) -> None:
@@ -1084,7 +1048,7 @@ class TestDoubleClick:
             critical_messages.append((title, text))
             return QMessageBox.StandardButton.Ok
 
-        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+        message_box.set_response("critical", fake_critical)
 
         # Simulate a double-click on a path outside the KB root
         # by creating an index that resolves outside
@@ -1104,6 +1068,7 @@ class TestDoubleClick:
 
         window._on_tree_double_clicked(faq_index)
 
+        message_box.reset()
         assert len(critical_messages) == 1
         assert "Access denied" in critical_messages[0][0]
 
@@ -1199,3 +1164,206 @@ class TestCloseButton:
         # close() on a non-modal QDialog emits finished(int) with QDialog.Rejected
         # as the result code; since WA_DeleteOnClose is False the widget survives.
         assert window.isHidden()
+
+
+# ===================================================================
+# Use Case 29 — View a Convertible Knowledge-Base File as Markdown
+# ===================================================================
+
+
+class TestConvertibleFileViewing:
+    """UC29: Read-only Markdown viewer for convertible files (PDF, docx, etc.)."""
+
+    def test_view_button_enabled_for_convertible_file(self, qtbot, kb_dir, tmp_path):
+        """The primary action button shows 'View' for convertible files."""
+        from product_description_tool.kb_window import CONVERTIBLE_EXTENSIONS as kdex
+
+        # Pick a convertible extension for this test
+        html_file = kb_dir / "test.html"
+        html_file.write_text("<html><body><p>Hello</p></body></html>", encoding="utf-8")
+
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+        window.show()
+
+        # Select the HTML file
+        idx = window._model.index(str(html_file))
+        window._tree.selectionModel().select(
+            idx,
+            window._tree.selectionModel().SelectionFlag.Select,
+        )
+
+        assert window._edit_button.isEnabled() is True
+        assert window._edit_button.text() == "View"
+
+    def test_edit_button_shows_edit_for_direct_read(self, qtbot, kb_dir):
+        """The primary action button shows 'Edit' for direct-read files."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+        window.show()
+
+        # Select an .md file
+        md_file = kb_dir / "faq.md"
+        idx = window._model.index(str(md_file))
+        window._tree.selectionModel().select(
+            idx,
+            window._tree.selectionModel().SelectionFlag.Select,
+        )
+
+        assert window._edit_button.isEnabled() is True
+        assert window._edit_button.text() == "Edit"
+
+    def test_view_converted_file_shows_markdown(self, qtbot, kb_dir, monkeypatch):
+        """Viewing a convertible HTML file calls load_markdown with the right args."""
+        import product_description_tool.kb_conversion as kc
+
+        html_file = kb_dir / "article.html"
+        html_file.write_text(
+            "<html><body><h1>Article</h1><p>Body text.</p></body></html>",
+            encoding="utf-8",
+        )
+
+        call_args = []
+
+        def fake_load(svc, file_path, kb_root):
+            call_args.append((str(file_path), str(kb_root)))
+            return "# Converted"
+
+        monkeypatch.setattr(kc.KnowledgeBaseContentService, "load_markdown", fake_load)
+
+        # Also monkeypatch QDialog.exec to return immediately
+        monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        window._view_converted_file(html_file)
+
+        assert len(call_args) == 1
+        assert call_args[0][0] == str(html_file)
+
+    def test_view_converted_file_readonly(self, qtbot, kb_dir, monkeypatch):
+        """The MarkdownEditor in view dialog is read-only."""
+        import product_description_tool.kb_conversion as kc
+
+        monkeypatch.setattr(kc.KnowledgeBaseContentService, "load_markdown", lambda s, fp, kr: "# Read-only test")
+
+        html_file = kb_dir / "readonly_test.html"
+        html_file.write_text("<html><body><p>Test</p></body></html>", encoding="utf-8")
+
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        # This approach verifies read-only by checking the editor widget state
+        # We'll use a close-to-open approach via monkeypatch
+        captured_editor = None
+
+        def capture_dialog(self_dialog):
+            nonlocal captured_editor
+            for child in self_dialog.children():
+                if isinstance(child, MarkdownEditor):
+                    captured_editor = child
+                    break
+            return QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr(QDialog, "exec", capture_dialog)
+
+        window._view_converted_file(html_file)
+
+        assert captured_editor is not None
+        assert captured_editor.isReadOnly() is True
+
+    def test_view_converted_file_has_external_button(self, qtbot, kb_dir, monkeypatch):
+        """View dialog has an 'Open Externally' button."""
+        import product_description_tool.kb_conversion as kc
+
+        monkeypatch.setattr(kc.KnowledgeBaseContentService, "load_markdown", lambda s, fp, kr: "# External test")
+
+        html_file = kb_dir / "external_test.html"
+        html_file.write_text("<html><body><p>Test</p></body></html>", encoding="utf-8")
+
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        opened_paths = []
+
+        def fake_open_external(path):
+            opened_paths.append(path)
+
+        monkeypatch.setattr("product_description_tool.kb_window.open_external", fake_open_external)
+
+        captured_dialog = None
+
+        def capture_and_exec(self_dialog):
+            nonlocal captured_dialog
+            captured_dialog = self_dialog
+            return QDialog.DialogCode.Rejected
+
+        monkeypatch.setattr(QDialog, "exec", capture_and_exec)
+
+        window._view_converted_file(html_file)
+
+        assert captured_dialog is not None
+        # Find and click the "Open Externally" button
+        for child in captured_dialog.children():
+            btn_text = getattr(child, "text", lambda: "")()
+            if btn_text == "Open Externally":
+                child.click()
+                break
+
+        assert len(opened_paths) == 1
+        assert opened_paths[0] == str(html_file)
+
+    def test_view_converted_file_handles_markitdown_unavailable(
+        self, qtbot, kb_dir, monkeypatch
+    ):
+        """When MarkItDown is unavailable, an error dialog is shown."""
+        import product_description_tool.kb_conversion as kc
+
+        critical_messages = []
+
+        def fake_critical(parent, title, text, *args, **kwargs):
+            critical_messages.append((title, text))
+            return QMessageBox.StandardButton.Ok
+
+        message_box.set_response("critical", fake_critical)
+        monkeypatch.setattr(
+            kc.KnowledgeBaseContentService,
+            "_check_markitdown",
+            lambda self: False,
+        )
+
+        html_file = kb_dir / "unavailable_test.html"
+        html_file.write_text("<html><body><p>Test</p></body></html>", encoding="utf-8")
+
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        window._view_converted_file(html_file)
+
+        message_box.reset()
+        assert len(critical_messages) == 1
+        assert any("Conversion unavailable" in msg for msg in critical_messages[0])
+
+    def test_double_click_opens_view_for_convertible(
+        self, qtbot, kb_dir, monkeypatch
+    ):
+        """Double-clicking a convertible file opens the view."""
+        html_file = kb_dir / "click_test.html"
+        html_file.write_text("<html><body><p>Click test</p></body></html>", encoding="utf-8")
+
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        opened_files = []
+
+        def fake_open_file_for_edit(path):
+            opened_files.append(path)
+
+        monkeypatch.setattr(window, "_open_file_for_edit", fake_open_file_for_edit)
+
+        idx = window._model.index(str(html_file))
+        window._on_tree_double_clicked(idx)
+
+        assert len(opened_files) == 1
+        assert opened_files[0] == str(html_file)

@@ -8,12 +8,19 @@ from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
-    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+)
+
+from product_description_tool import input_dialog
+from product_description_tool.message_box import (
+    information,
+    warning,
+    critical,
+    question,
+    QMessageBoxStandardButton as StandardButton,
 )
 
 from product_description_tool.kb_editor import open_external
@@ -90,7 +97,7 @@ class CsvEditorDialog(QDialog):
         try:
             content = self._file_path.read_text(encoding="utf-8-sig")
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(
+            critical(
                 self,
                 "Read failed",
                 f"Could not read '{self._file_path}':\n{exc}",
@@ -189,7 +196,7 @@ class CsvEditorDialog(QDialog):
         """Remove the selected row (first selected)."""
         current_row = self._table.currentRow()
         if current_row < 0:
-            QMessageBox.information(
+            information(
                 self, "No row selected", "Select a row to remove first.",
             )
             return
@@ -201,7 +208,7 @@ class CsvEditorDialog(QDialog):
 
     def _add_column(self) -> None:
         """Add a new column, prompting for its header name."""
-        name, accepted = QInputDialog.getText(
+        name, accepted = input_dialog.get_text(
             self,
             "New Column",
             "Column header name:",
@@ -215,7 +222,7 @@ class CsvEditorDialog(QDialog):
             if self._table.horizontalHeaderItem(c)
         ]
         if name in existing_headers:
-            QMessageBox.warning(
+            warning(
                 self,
                 "Duplicate header",
                 f"A column named '{name}' already exists.",
@@ -232,7 +239,7 @@ class CsvEditorDialog(QDialog):
         """Remove the selected column (first selected)."""
         current_col = self._table.currentColumn()
         if current_col < 0:
-            QMessageBox.information(
+            information(
                 self,
                 "No column selected",
                 "Select a column to remove first.",
@@ -243,14 +250,14 @@ class CsvEditorDialog(QDialog):
             if self._table.horizontalHeaderItem(current_col)
             else f"column {current_col}"
         )
-        answer = QMessageBox.question(
+        answer = question(
             self,
             "Remove column",
             f"Remove column '{header}' and all its data?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            StandardButton.Yes | StandardButton.No,
+            StandardButton.No,
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        if answer != StandardButton.Yes:
             return
         self._table.removeColumn(current_col)
 
@@ -288,7 +295,7 @@ class CsvEditorDialog(QDialog):
                     ]
                     writer.writerow(row_data)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(
+            critical(
                 self,
                 "Save failed",
                 f"Could not write '{self._file_path}':\n{exc}",

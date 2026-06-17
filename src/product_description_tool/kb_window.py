@@ -7,20 +7,26 @@ from PySide6.QtCore import Qt, QModelIndex, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QDialog,
-    QFileDialog,
     QFileSystemModel,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
     QLabel,
-    QMessageBox,
     QPushButton,
     QTreeView,
     QVBoxLayout,
 )
 
+from product_description_tool import message_box, input_dialog, file_dialog
+from product_description_tool.kb_conversion import (
+    CONVERTIBLE_EXTENSIONS,
+    ConversionFailedError,
+    KnowledgeBaseContentService,
+    MarkItDownUnavailableError,
+)
 from product_description_tool.kb_csv_editor import CsvEditorDialog
 from product_description_tool.kb_editor import MarkdownEditor, open_external
+
+from .message_box import information, warning, critical, question, QMessageBoxStandardButton as StandardButton
 
 
 # File types supported for embedded editing (text and CSV).
@@ -199,12 +205,27 @@ class KnowledgeBaseManager(QDialog):
         # File-management buttons
         self._open_external_button.setEnabled(has_root and count >= 1)
         single = self._selected_single_path()
-        self._edit_button.setEnabled(
+        single_path = Path(single) if single is not None else None
+        single_suffix = single_path.suffix.lower() if single_path is not None else ""
+        is_editable = (
             has_root
             and single is not None
-            and Path(single).is_file()
-            and Path(single).suffix.lower() in _EMBEDDED_EDIT_SUFFIXES
+            and single_path is not None
+            and single_path.is_file()
+            and single_suffix in _EMBEDDED_EDIT_SUFFIXES
         )
+        is_viewable = (
+            has_root
+            and single is not None
+            and single_path is not None
+            and single_path.is_file()
+            and single_suffix in CONVERTIBLE_EXTENSIONS
+        )
+        self._edit_button.setEnabled(is_editable or is_viewable)
+        if is_viewable and not is_editable:
+            self._edit_button.setText("View")
+        else:
+            self._edit_button.setText("Edit")
         self._copy_button.setEnabled(has_root and count == 1)
         self._rename_button.setEnabled(has_root and count == 1)
         self._delete_button.setEnabled(has_root and count >= 1)
@@ -236,7 +257,7 @@ class KnowledgeBaseManager(QDialog):
     # ------------------------------------------------------------------
 
     def _set_directory(self) -> None:
-        directory = QFileDialog.getExistingDirectory(
+        directory = file_dialog.get_existing_directory(
             self,
             "Select Knowledge Base Directory",
             self._kb_directory or "",
@@ -261,7 +282,7 @@ class KnowledgeBaseManager(QDialog):
 
     def _open_in_explorer(self) -> None:
         if not self._kb_directory:
-            QMessageBox.information(
+            information(
                 self,
                 "No directory",
                 "No knowledge-base directory is configured.",
@@ -282,7 +303,7 @@ class KnowledgeBaseManager(QDialog):
         try:
             self._assert_within_kb_root(path)
         except ValueError as exc:
-            QMessageBox.critical(self, "Access denied", str(exc))
+            critical(self, "Access denied", str(exc))
             return
         self._open_file_for_edit(path)
 
@@ -293,15 +314,15 @@ class KnowledgeBaseManager(QDialog):
         try:
             self._assert_within_kb_root(path)
         except ValueError as exc:
-            QMessageBox.critical(self, "Access denied", str(exc))
+            critical(self, "Access denied", str(exc))
             return
         self._open_file_for_edit(path)
 
     def _open_file_for_edit(self, path: str) -> None:
-        """Open *path* in the appropriate embedded editor or externally."""
+        """Open *path* in the appropriate embedded editor or viewer."""
         file_path = Path(path)
         if not file_path.is_file():
-            QMessageBox.warning(self, "Not a file", f"'{path}' is not a file.")
+            warning(self, "Not a file", f"'{path}' is not a file.")
             return
 
         suffix = file_path.suffix.lower()
@@ -309,6 +330,8 @@ class KnowledgeBaseManager(QDialog):
             self._edit_text_file(file_path)
         elif suffix == ".csv":
             self._edit_csv_file(file_path)
+        elif suffix in CONVERTIBLE_EXTENSIONS:
+            self._view_converted_file(file_path)
         else:
             open_external(path)
 
@@ -317,7 +340,7 @@ class KnowledgeBaseManager(QDialog):
         try:
             content = path.read_text(encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(
+            critical(
                 self,
                 "Read failed",
                 f"Could not read '{path}':\n{exc}",
@@ -358,7 +381,7 @@ class KnowledgeBaseManager(QDialog):
                 path.write_text(new_content, encoding="utf-8")
                 self._rebuild_tree()
             except Exception as exc:  # noqa: BLE001
-                QMessageBox.critical(
+                critical(
                     self,
                     "Save failed",
                     f"Could not write '{path}':\n{exc}",
@@ -371,13 +394,80 @@ class KnowledgeBaseManager(QDialog):
         if dialog.exec() == QDialog.Accepted:
             self._rebuild_tree()
 
+    def _view_converted_file(self, path: Path) -> None:
+        """Open a convertible file in a read-only Markdown viewer dialog.
+
+        Converts the file to Markdown (with caching), then displays it in
+        a non-editable Markdown viewer.  The dialog also offers an action
+        to open the original file externally.
+        """
+        svc = KnowledgeBaseContentService()
+        try:
+            kb_root = Path(self._kb_directory).resolve() if self._kb_directory else None
+            if kb_root is None:
+                critical(
+                    self, "No knowledge base",
+                    "No knowledge-base directory is configured.",
+                )
+                return
+            markdown = svc.load_markdown(path, kb_root)
+        except MarkItDownUnavailableError:
+            critical(
+                self,
+                "Conversion unavailable",
+                f"Cannot view '{path.name}': MarkItDown is not available.\n\n"
+                "Install the markitdown package or open the file externally.",
+            )
+            return
+        except ConversionFailedError as exc:
+            critical(
+                self,
+                "Conversion failed",
+                str(exc),
+            )
+            return
+        except Exception as exc:  # noqa: BLE001
+            critical(
+                self,
+                "View failed",
+                f"Could not open '{path.name}' for viewing:\n{exc}",
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"View: {path.name} (converted Markdown)")
+        dialog.resize(680, 480)
+        dialog.setModal(True)
+        layout = QVBoxLayout(dialog)
+
+        editor = MarkdownEditor()
+        editor.setPlainText(markdown)
+        editor.setReadOnly(True)
+        layout.addWidget(editor, 1)
+
+        button_layout = QHBoxLayout()
+
+        external_button = QPushButton("Open Externally")
+        external_button.clicked.connect(lambda: open_external(str(path)))
+        button_layout.addWidget(external_button)
+
+        button_layout.addStretch(1)
+
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.accept)
+        button_layout.addWidget(close_button)
+
+        layout.addLayout(button_layout)
+
+        dialog.exec()
+
     def _open_selected_external(self) -> None:
         paths = self._selected_paths()
         for path in paths:
             try:
                 self._assert_within_kb_root(path)
             except ValueError as exc:
-                QMessageBox.critical(self, "Access denied", str(exc))
+                critical(self, "Access denied", str(exc))
                 continue
             open_external(path)
 
@@ -389,9 +479,9 @@ class KnowledgeBaseManager(QDialog):
         try:
             self._assert_within_kb_root(source)
         except ValueError as exc:
-            QMessageBox.critical(self, "Access denied", str(exc))
+            critical(self, "Access denied", str(exc))
             return
-        new_name, accepted = QInputDialog.getText(
+        new_name, accepted = input_dialog.get_text(
             self,
             "Copy",
             f"Enter name for the copy of '{source.name}':",
@@ -403,7 +493,7 @@ class KnowledgeBaseManager(QDialog):
         try:
             self._assert_within_kb_root(target)
         except ValueError as exc:
-            QMessageBox.critical(self, "Access denied", str(exc))
+            critical(self, "Access denied", str(exc))
             return
         try:
             if source.is_dir():
@@ -411,7 +501,7 @@ class KnowledgeBaseManager(QDialog):
             else:
                 shutil.copy2(source, target)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(
+            critical(
                 self,
                 "Copy failed",
                 f"Could not copy '{source}' to '{target}':\n{exc}",
@@ -427,9 +517,9 @@ class KnowledgeBaseManager(QDialog):
         try:
             self._assert_within_kb_root(source)
         except ValueError as exc:
-            QMessageBox.critical(self, "Access denied", str(exc))
+            critical(self, "Access denied", str(exc))
             return
-        new_name, accepted = QInputDialog.getText(
+        new_name, accepted = input_dialog.get_text(
             self,
             "Rename",
             f"New name for '{source.name}':",
@@ -441,12 +531,12 @@ class KnowledgeBaseManager(QDialog):
         try:
             self._assert_within_kb_root(target)
         except ValueError as exc:
-            QMessageBox.critical(self, "Access denied", str(exc))
+            critical(self, "Access denied", str(exc))
             return
         try:
             source.rename(target)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(
+            critical(
                 self,
                 "Rename failed",
                 f"Could not rename '{source}' to '{target}':\n{exc}",
@@ -462,18 +552,18 @@ class KnowledgeBaseManager(QDialog):
             try:
                 self._assert_within_kb_root(path_str)
             except ValueError as exc:
-                QMessageBox.critical(self, "Access denied", str(exc))
+                critical(self, "Access denied", str(exc))
                 return
         names = "\n".join(f"  • {Path(p).name}" for p in paths)
         label = "these items" if len(paths) > 1 else "this item"
-        reply = QMessageBox.question(
+        reply = question(
             self,
             "Confirm deletion",
             f"Delete {label} permanently?\n\n{names}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            StandardButton.Yes | StandardButton.No,
+            StandardButton.No,
         )
-        if reply != QMessageBox.StandardButton.Yes:
+        if reply != StandardButton.Yes:
             return
         errors: list[str] = []
         for path_str in paths:
@@ -489,7 +579,7 @@ class KnowledgeBaseManager(QDialog):
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"  {p.name}: {exc}")
         if errors:
-            QMessageBox.critical(
+            critical(
                 self,
                 "Deletion errors",
                 "Some items could not be deleted:\n" + "\n".join(errors),

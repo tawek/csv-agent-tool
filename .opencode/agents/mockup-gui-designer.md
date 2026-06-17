@@ -45,6 +45,7 @@ Each mockup should include:
 - modal vs modeless behavior
 - key validation/error states
 - interaction notes that matter to implementation
+- references to the spec/request artifacts consumed
 
 Use plain markdown with headings, bullets, and simple ASCII wireframe blocks where helpful.
 
@@ -61,3 +62,4 @@ Use plain markdown with headings, bullets, and simple ASCII wireframe blocks whe
 1. Mockups are stored in the correct feature workspace.
 2. The mockups are specific enough that a developer can implement the UI without guessing major layout or control structure.
 3. Any ambiguous UX areas are clearly labeled as open questions.
+4. The mockups explicitly reference the input artifacts they are translating.
