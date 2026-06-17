@@ -27,6 +27,7 @@ class FieldConfig:
 class CsvConfig:
     export_path: str = ""
     export_only_visible: bool = True
+    export_order: list[str] = field(default_factory=list)
     fields: dict[str, FieldConfig] = field(default_factory=dict)
     delimiter: str = ";"
     quotechar: str = '"'
@@ -42,7 +43,8 @@ class CsvConfig:
         }
         return cls(
             export_path=data.get("export-path", ""),
-            export_only_visible=bool(data.get("export-only-visible", False)),
+            export_only_visible=bool(data.get("export-only-visible", True)),
+            export_order=list(data.get("export-order", [])),
             fields=fields,
             delimiter=data.get("delimiter", ";") or ";",
             quotechar=data.get("quotechar", '"') or '"',
@@ -52,9 +54,10 @@ class CsvConfig:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "export-path": self.export_path,
             "export-only-visible": self.export_only_visible,
+            "export-order": self.export_order,
             "fields": {
                 key: asdict(value)
                 for key, value in self.fields.items()
@@ -65,6 +68,7 @@ class CsvConfig:
             "newline": self.newline,
             "write_header": self.write_header,
         }
+        return result
 
 
 @dataclass(slots=True)

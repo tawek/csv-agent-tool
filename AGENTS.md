@@ -100,7 +100,41 @@ Follow the spec-first workflow for any feature, bug fix, or behavior change. Kee
     ```bash
     QT_QPA_PLATFORM=offscreen PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1 uv run pytest
     ```
-4. **Show or summarize the code changes** and test results to the user. Reference the Use Case numbers and spec sections the implementation satisfies.
+4. **Track review follow-ups explicitly.** When QA, Architect, or another specialist reports findings, record them in an action register and assign each one a disposition: fix now, defer, reject, or monitor. Do not treat the review as closed until every finding has a disposition.
+5. **Show or summarize the code changes** and test results to the user. Reference the Use Case numbers and spec sections the implementation satisfies, and include any open or deferred follow-up items.
+
+#### Action Register Procedure
+
+When a review produces findings, maintain an **Action Register** with one entry per finding.
+
+**Where to record it:**
+- In the live session `todowrite` list for execution tracking.
+- In a git-tracked per-feature workspace at `project/<feature>/`, with at least an `action-register.md` file.
+- In the user-facing update/final report under a dedicated **Action Register** heading.
+
+**Scoping rule:**
+- Do not keep a single long-lived root `TODO.md` for all work.
+- Prefer one workspace per feature, sprint, or review stream so records remain scoped and reviewable in git.
+
+**Recommended workspace contents:**
+- `action-register.md` — required review findings and dispositions
+- `reviews.md` — architect/QA review summaries and decisions
+- `implementation-notes.md` — technical notes, follow-up rationale, and handoff context
+- `status.md` — current state, next steps, and closure summary
+
+**Required entry format:**
+- **ID** — short stable identifier such as `AR-1`, `QA-2`
+- **Source** — Architect, QA, Problem Solver, etc.
+- **Finding** — concise description of the issue or recommendation
+- **Disposition** — exactly one of: `fix now`, `defer`, `reject`, `monitor`
+- **Owner** — who is responsible for the next step
+- **Target** — current task, follow-up task, or later milestone
+- **Status** — `open`, `in_progress`, `closed`
+
+**Closure rule:**
+- A review is not closed until every finding has a disposition.
+- The task is not reported complete while any `fix now` item remains open.
+- Deferred or rejected items must include a short rationale in the user report.
 
 #### Step 3: Commit
 
@@ -159,6 +193,24 @@ For packaging-related changes, also run:
 uv run pyinstaller packaging/product_description_tool.spec
 ```
 
+## Architectural Review Gate
+
+When source code changes are architecturally significant, require a post-implementation review by `@code-architect` before the final user report.
+
+Architect review is required when any of the following apply:
+- The implementation spans multiple source modules in `src/product_description_tool/`.
+- The change alters shared interfaces or contracts, including signals, provider contracts, config serialization, project-file shapes, or other persisted data shapes.
+- The change follows a spec update for a feature, bug fix, or behavior modification.
+
+Architect review is usually not required for a trivial isolated change that stays within one module and does not affect shared contracts, persisted shapes, or specified behavior.
+
+When required:
+1. Implement and validate the change first.
+2. Have `@code-architect` review the resulting code and any related spec or architecture artifacts for architectural fit and contract consistency.
+3. Record the architect's findings in the action register and assign each one a disposition.
+4. Resolve any architect feedback that is not explicitly deferred or rejected with rationale before final user reporting.
+5. Do not present the work as complete to the user until that review gate has passed.
+
 ## OpenCode Agent Configuration
 
 Agents are configured in `.opencode/agents/`. Each agent is self-contained with
@@ -168,7 +220,7 @@ project-specific knowledge embedded in its system prompt.
 
 | File | Role | Model | Reasoning |
 |------|------|-------|-----------|
-| `leader.md` | Team Lead | `openai/gpt-5.4` | low |
+| `leader.md` | Team Lead and Team Config Maintainer | `openai/gpt-5.4` | low |
 | `problem-solver.md` | Problem Solver | `openai/gpt-5.4` | high |
 | `code-architect.md` | Code Architect | `openai/gpt-5.4` | high |
 | `product-developer.md` | Product Developer (Senior) | `opencode/deepseek-v4-flash-free` | — |
@@ -181,28 +233,31 @@ project-specific knowledge embedded in its system prompt.
 - **Primary agent**: `leader`
 - **Specialists**: `@product-developer`, `@product-developer-junior`, `@qa-engineer`, `@code-explorer`, `@problem-solver`, `@code-architect`
 
+The `leader` agent has direct authority to define and maintain team coordination rules and agent configuration in `AGENTS.md` and files under `.opencode/agents/`, and may edit those files directly. In normal operation, the leader should still delegate application code, specs, and tests to the appropriate specialists rather than taking on that product work personally.
+
 ### Persistent Outputs
 
 - **Specs and docs**: `docs/` (specification, project model, architecture, QA reports)
 - **Architecture docs**: `docs/architecture/<prefix>-*.md`
 - **QA reports**: `docs/qa/<prefix>-*.md`
-- **Analysis reports**: `docs/analysis/<prefix>-*.md`
+- **Feature workspaces**: `project/<feature>/` containing scoped planning and review artifacts such as `action-register.md`, `reviews.md`, `implementation-notes.md`, and `status.md`
 
 ### Parallel Work Limits
 
 - `src/product_description_tool/` is a single shared implementation scope. Only one code-writing agent may edit it at a time.
 - `tests/` is a separate QA-owned scope. QA can work in parallel only after the intended behavior and any source-facing contracts are stable enough to test.
 - `docs/specification.md` and `docs/architecture/` are contract-defining artifacts. When a task changes behavior or shared interfaces, those artifacts must be updated before downstream implementation work starts.
+- Architecturally significant source changes require a post-implementation `@code-architect` review before final user reporting.
 - If future work requires true parallel implementation lanes, refactor the source tree first into separately ownable directories or packages.
 
 ### Permission Summary
 
 | Agent | read | edit | bash | task |
 |-------|------|------|------|------|
-| Leader | deny | deny | ask | `*`: allow |
-| Problem Solver | allow | deny | ask | deny |
-| Code Architect | allow | allow (`docs/specification.md`, `docs/architecture/`) | ask | deny |
-| Product Developer | allow | allow (`src/product_description_tool/`, `packaging/`) | ask | deny |
-| Product Developer (Junior) | allow | allow (`src/product_description_tool/`, `packaging/`) | ask | deny |
-| QA Engineer | allow | allow (tests/) | ask | deny |
-| Code Explorer | allow | deny | ask | deny |
+| Leader | allow (`AGENTS.md`, `.opencode/agents/`) for direct team-rule and agent-configuration maintenance | allow (`AGENTS.md`, `.opencode/agents/`) for direct team-rule and agent-configuration maintenance | allow | `*`: allow |
+| Problem Solver | allow | deny | allow | deny |
+| Code Architect | allow | allow (`docs/specification.md`, `docs/architecture/`) | allow | deny |
+| Product Developer | allow | allow (`src/product_description_tool/`, `packaging/`) | allow | deny |
+| Product Developer (Junior) | allow | allow (`src/product_description_tool/`, `packaging/`) | allow | deny |
+| QA Engineer | allow | allow (tests/) | allow | deny |
+| Code Explorer | allow | deny | allow | deny |

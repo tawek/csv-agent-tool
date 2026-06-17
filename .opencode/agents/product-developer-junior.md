@@ -6,7 +6,7 @@ permission:
   edit:
     "src/product_description_tool/**/*.py": allow
     "packaging/**/*.spec": allow
-  bash: ask
+  bash: allow
   task: deny
 ---
 

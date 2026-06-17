@@ -5,7 +5,7 @@ permission:
   read: allow
   edit:
     "tests/**/*.py": allow
-  bash: ask
+  bash: allow
   task: deny
 ---
 

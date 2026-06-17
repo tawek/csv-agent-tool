@@ -25,9 +25,10 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
    - **OpenAI-compatible:** Base URL, API key, model name, and arbitrary options JSON.
 4. The user can refresh the model list from the active provider endpoint via a refresh button.
 5. The user sets generation parameters: temperature (0.0-2.0), top-p (0.0-1.0), max output tokens (1-200000).
-6. The user configures CSV I/O: delimiter (`;` by default), quote char, encoding, newline character, whether to write headers, and the default state of the "export only visible rows" checkbox (a boolean option).
-7. The user manages per-column visibility and display labels through an editable table of fields. They may reset the fields table to match the currently loaded CSV headers.
-8. The user confirms or cancels. On confirm, the provider config and generation config are saved to the persistent `ConfigStore` (JSON on disk). The project-scoped `CsvConfig` is applied to the working document and table model.
+6. The user configures CSV I/O: delimiter (`;` by default), quote char, encoding, newline character, whether to write headers, and the default state of the "export only visible rows" checkbox (a boolean option). When a saved app or project CSV config omits either `delimiter` or `export_only_visible`, the application falls back to the same defaults used for a fresh `CsvConfig` (`;` and `True`, respectively).
+7. The user manages per-column visibility, display labels, whitespace-stripping flags, and CSV export column order through the editable fields configuration in the **CSV** tab.
+8. The user may reset the fields configuration to match the currently loaded CSV headers. Resetting restores the current document header order as the export column order and recreates field entries for all current headers.
+9. The user confirms or cancels. On confirm, the provider config and generation config are saved to the persistent `ConfigStore` (JSON on disk). The project-scoped `CsvConfig` is applied to the working document and table model, including the configured export column order.
 
 **Postconditions:** The updated configuration is persisted and immediately applied to the working session.
 
@@ -90,7 +91,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 1. For **Save As**, a file dialog prompts for a destination path. The path is normalized to end in `.project.json`.
 2. The `ProjectRepository.save()` method writes each prompt's text to a sidecar `.prompt.txt` file in the same directory.
-3. The project metadata (prompts, enabled states, prompt-to-output-column mapping, project-scoped knowledge-base directory, CSV config, field labels/visibility) is written to `*.project.json`.
+3. The project metadata (prompts, enabled states, prompt-to-output-column mapping, project-scoped knowledge-base directory, CSV config, and field metadata including labels, visibility, whitespace-stripping flags, and export column order) is written to `*.project.json`.
 4. The working `CsvDocument` is written to the sibling `*.csv` file using the project's `CsvConfig`.
 5. The `project_path` is updated, and the dirty flag is cleared.
 
@@ -133,7 +134,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 2. An `ExportDialog` opens with the following controls:
    - A **target path** text field pre-populated with the resolved target path from step 1.
    - A **Browse** button next to the target path field that opens a file save dialog to set the destination path.
-   - An **"Export only visible rows"** checkbox. The checkbox state reflects the `export_only_visible` setting from the project CSV config, propagated as-is. If no filters are active (i.e., `filter_patterns` is empty), the checkbox is grayed out and unchecked.
+   - An **"Export only visible rows"** checkbox. The checkbox state reflects the effective `export_only_visible` setting from the project CSV config. If that setting is absent in persisted config data, the effective default is `True`. If no filters are active (i.e., `filter_patterns` is empty), the checkbox is grayed out and unchecked.
    - An **Export** button and a **Cancel** button.
 3. The user may adjust the target path by typing or clicking **Browse**.
 4. The user checks or unchecks the visibility option.
@@ -146,9 +147,16 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
       - If **Export only visible rows** is checked, the application iterates over the proxy model's visible rows, mapping each back to its source row index via `proxy_model.mapToSource()`, and builds a `CsvDocument` containing only those rows.
       - If the checkbox is unchecked, the full `CsvDocument` is used.
    5d. If no visible rows exist and the checkbox is checked, a warning dialog is shown and the export is aborted; the export dialog remains open.
-   5e. The `CsvRepository.save()` method writes the (possibly filtered) `CsvDocument` to the target path using the project's `CsvConfig`.
-   5f. The `export_path` is updated in the project's CSV config to the target path, and the dirty flag is set so the change is persisted on next project save.
-   5g. The dialog closes.
+   5e. Before writing, the application derives the export header order from the project's current CSV field configuration.
+      - The configured order is normalized against the current `CsvDocument` headers before export.
+      - Duplicate configured column names are collapsed to their first occurrence.
+      - Configured column names that are no longer present in the current document are ignored.
+      - Any current document headers not named by the normalized configured order are appended in their current document-header order.
+      - Export still includes every column present in the current `CsvDocument` exactly once; hidden columns are not omitted by this feature.
+      - If the field configuration has been reset from the current CSV, the export order matches the current document header order.
+   5f. The `CsvRepository.save()` method writes the (possibly filtered) `CsvDocument` to the target path using the project's `CsvConfig` and the derived export column order.
+   5g. The `export_path` is updated in the project's CSV config to the target path, and the dirty flag is set so the change is persisted on next project save.
+   5h. The dialog closes.
 6. The status bar shows confirmation of the export location and the number of rows exported.
 
 **Postconditions:** The CSV file exists on disk with the selected rows from the working document.
@@ -159,11 +167,13 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 - Write failure (disk full, permissions, etc.): a critical error dialog is shown and the export is aborted.
 
 **Invariants:**
-- The exported CSV always includes all column headers from the original document, even if some columns are hidden in the UI (column visibility does not affect export).
+- The exported CSV always includes all column headers from the current document exactly once, even if some columns are hidden in the UI (column visibility does not affect export).
+- When an export column order is configured, the exported header row and each exported data row follow the normalized configured order: current columns only, no duplicates, with any otherwise-unmentioned current columns appended in current document order.
+- Resetting the fields configuration from the current CSV restores the export column order to the current document header order.
 - The checkbox state and target path are independent — changing one does not reset the other.
 - The export dialog remains open on any error or abort, allowing the user to correct the issue.
 - Exporting visible rows creates a temporary in-memory `CsvDocument` and never modifies `self.document`.
-- The `export_path` is stored in the project's CSV config and persists across sessions. On a standalone (non-project) CSV import, `export_path` is not persisted to disk but `current_external_csv_path` is updated in memory.
+- The `export_path` is stored in the project's CSV config and persists across sessions. The export column order is also part of the project's CSV field configuration and persists across project save/load cycles. On a standalone (non-project) CSV import, `export_path` is not persisted to disk but `current_external_csv_path` is updated in memory.
 - The initial target path for export is always the input CSV path; the user must explicitly change it via typing or Browse.
 
 ## Use Case 7: Add a Prompt
@@ -644,7 +654,8 @@ User clicks the minimize or maximize button in any pane header.
 - Filtering affects the table view display and the scope of "Process Visible Rows". It does not modify or remove data.
 - Prompt templates can reference any CSV column by name via `{{column_name}}` placeholders.
 - Prompt templates can also reference project-scoped knowledge-base files via `{{@relative/path.ext}}`; only `.md`, `.markdown`, and `.csv` files are supported, paths are resolved relative to the configured knowledge-base directory, escaping that directory is forbidden, and included content is inserted verbatim without recursive rendering.
-- The default CSV delimiter is `;` (semicolon). New projects and fresh installs use this delimiter unless the user changes it in Settings.
+- The default CSV delimiter is `;` (semicolon). New projects, fresh installs, and any persisted CSV config missing a delimiter value use this delimiter unless the user changes it in Settings.
+- The default `export_only_visible` setting is `True`. New projects, fresh installs, and any persisted CSV config missing that value use `True` as the effective setting until the user changes it.
 - Generation parameters (temperature, top_p, max_output_tokens) apply to all providers and are shared across prompts in a single run.
 - The dirty flag (`_project_modified`) tracks unsaved changes and triggers save prompts on project switches.
 - Each field in `FieldConfig` may have `strip_html_whitespace=True`, which normalizes consecutive whitespace in the cell value to a single space during CSV export.

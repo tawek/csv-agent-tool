@@ -609,10 +609,18 @@ class SettingsDialog(QDialog):
 
         columns_row = QHBoxLayout()
         columns_row.addWidget(QLabel("Columns"))
+        self.move_up_button = QPushButton("▲")
+        self.move_up_button.setToolTip("Move selected field up in export order")
+        self.move_up_button.clicked.connect(self._move_field_up)
+        columns_row.addWidget(self.move_up_button)
+        self.move_down_button = QPushButton("▼")
+        self.move_down_button.setToolTip("Move selected field down in export order")
+        self.move_down_button.clicked.connect(self._move_field_down)
+        columns_row.addWidget(self.move_down_button)
+        columns_row.addStretch(1)
         self.reset_columns_button = QPushButton("Reset From Current CSV")
         self.reset_columns_button.setEnabled(bool(self._current_headers))
         self.reset_columns_button.clicked.connect(self._reset_columns_from_current_csv)
-        columns_row.addStretch(1)
         columns_row.addWidget(self.reset_columns_button)
         layout.addLayout(columns_row)
 
@@ -629,7 +637,19 @@ class SettingsDialog(QDialog):
     def _field_rows(self) -> list[tuple[str, FieldConfig]]:
         rows: list[tuple[str, FieldConfig]] = []
         seen: set[str] = set()
-        for header in self._current_headers:
+
+        # Determine ordered list of current headers: respect export_order,
+        # then append any current headers not yet listed, then extra fields.
+        export_order = self._config.csv.export_order or []
+        ordered: list[str] = []
+        for h in export_order:
+            if h in self._current_headers:
+                ordered.append(h)
+        for h in self._current_headers:
+            if h not in ordered:
+                ordered.append(h)
+
+        for header in ordered:
             config = self._config.csv.fields.get(header, FieldConfig(label=header, show=True))
             rows.append((header, config))
             seen.add(header)
@@ -674,12 +694,42 @@ class SettingsDialog(QDialog):
     def _reset_columns_from_current_csv(self) -> None:
         if not self._current_headers:
             return
+        self._config.csv.export_order = list(self._current_headers)
         self._config.csv.fields = {
             header: FieldConfig(label=header, show=True, strip_html_whitespace=False)
             for header in self._current_headers
         }
         self._populate_fields_table()
         self.fields_table.resizeColumnsToContents()
+
+    def _move_field_up(self) -> None:
+        row = self.fields_table.currentRow()
+        if row <= 0:
+            return
+        self._swap_rows(row, row - 1)
+        self.fields_table.setCurrentCell(row - 1, 0)
+
+    def _move_field_down(self) -> None:
+        row = self.fields_table.currentRow()
+        if row < 0 or row >= self.fields_table.rowCount() - 1:
+            return
+        self._swap_rows(row, row + 1)
+        self.fields_table.setCurrentCell(row + 1, 0)
+
+    def _swap_rows(self, row_a: int, row_b: int) -> None:
+        for col in range(self.fields_table.columnCount()):
+            item_a = self.fields_table.takeItem(row_a, col)
+            item_b = self.fields_table.takeItem(row_b, col)
+            self.fields_table.setItem(row_a, col, item_b)
+            self.fields_table.setItem(row_b, col, item_a)
+
+    def _collect_export_order(self) -> list[str]:
+        order: list[str] = []
+        for row_index in range(self.fields_table.rowCount()):
+            item = self.fields_table.item(row_index, 0)
+            if item is not None:
+                order.append(item.text())
+        return order
 
     def _collect_fields(self) -> dict[str, FieldConfig]:
         fields: dict[str, FieldConfig] = {}
@@ -761,6 +811,7 @@ class SettingsDialog(QDialog):
                 },
                 "csv": {
                     "fields": {key: asdict(value) for key, value in csv_fields.items()},
+                    "export-order": self._collect_export_order(),
                     "delimiter": self._single_char_value(
                         self.delimiter_edit.text(),
                         "Delimiter",

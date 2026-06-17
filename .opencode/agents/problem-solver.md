@@ -7,7 +7,7 @@ model_configuration:
 permission:
   read: allow
   edit: deny
-  bash: ask
+  bash: allow
   task: deny
 ---
 

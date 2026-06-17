@@ -4,7 +4,7 @@ model: opencode/deepseek-v4-flash-free
 permission:
   read: allow
   edit: deny
-  bash: ask
+  bash: allow
   task: deny
 ---
 

@@ -295,3 +295,92 @@ def test_export_dialog_browse_updates_path(qtbot, monkeypatch) -> None:
     dialog._browse_path()
 
     assert dialog.path_edit.text() == "/tmp/browsed.csv"
+
+
+def test_settings_dialog_table_order_respects_export_order(qtbot) -> None:
+    """Table rows are ordered per export_order, then remaining current headers."""
+    config = AppConfig()
+    config.csv.export_order = ["generated", "sku"]
+    dialog = SettingsDialog(
+        config,
+        current_headers=["sku", "description", "generated"],
+    )
+    qtbot.addWidget(dialog)
+
+    # export_order sets "generated" first, then "sku"; remaining "description" appended
+    assert dialog.fields_table.item(0, 0).text() == "generated"
+    assert dialog.fields_table.item(1, 0).text() == "sku"
+    assert dialog.fields_table.item(2, 0).text() == "description"
+
+
+def test_settings_dialog_get_config_includes_export_order(qtbot) -> None:
+    """get_config returns export_order derived from table row order."""
+    config = AppConfig()
+    dialog = SettingsDialog(
+        config,
+        current_headers=["sku", "description", "generated"],
+    )
+    qtbot.addWidget(dialog)
+
+    # Move "generated" up twice to the top
+    dialog.fields_table.setCurrentCell(2, 0)
+    dialog._move_field_up()
+    dialog._move_field_up()
+
+    updated = dialog.get_config()
+    assert updated.csv.export_order == ["generated", "sku", "description"]
+
+
+def test_settings_dialog_move_field_down_alters_export_order(qtbot) -> None:
+    """Moving a field down changes the collected export_order."""
+    config = AppConfig()
+    dialog = SettingsDialog(
+        config,
+        current_headers=["sku", "description", "generated"],
+    )
+    qtbot.addWidget(dialog)
+
+    # Move "description" (row 1) down to row 2
+    dialog.fields_table.setCurrentCell(1, 0)
+    dialog._move_field_down()
+
+    updated = dialog.get_config()
+    assert updated.csv.export_order == ["sku", "generated", "description"]
+
+
+def test_settings_dialog_move_field_up_respects_bounds(qtbot) -> None:
+    """Moving the top field up is a no-op and does not change export_order."""
+    config = AppConfig()
+    dialog = SettingsDialog(
+        config,
+        current_headers=["sku", "description", "generated"],
+    )
+    qtbot.addWidget(dialog)
+
+    dialog.fields_table.setCurrentCell(0, 0)
+    dialog._move_field_up()
+
+    updated = dialog.get_config()
+    assert updated.csv.export_order == ["sku", "description", "generated"]
+
+
+def test_settings_dialog_reset_columns_sets_export_order(qtbot) -> None:
+    """Reset From Current CSV sets export_order to match current_headers order."""
+    config = AppConfig()
+    config.csv.export_order = ["generated", "sku"]  # arbitrary prior order
+    config.csv.fields = {
+        "old": FieldConfig(label="Old", show=False),
+    }
+    dialog = SettingsDialog(
+        config,
+        current_headers=["sku", "description", "generated"],
+    )
+    qtbot.addWidget(dialog)
+
+    dialog._reset_columns_from_current_csv()
+    updated = dialog.get_config()
+
+    assert updated.csv.export_order == ["sku", "description", "generated"]
+    assert list(updated.csv.fields.keys()) == ["sku", "description", "generated"]
+    assert all(field.show for field in updated.csv.fields.values())
+    assert updated.csv.fields["generated"].strip_html_whitespace is False
