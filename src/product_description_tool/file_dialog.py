@@ -112,4 +112,7 @@ def get_existing_directory(
         if callable(response):
             return response(parent, caption, directory, options)
         return response
-    return QFileDialog.getExistingDirectory(parent, caption, directory, options)
+    dialog_options = options
+    if not isinstance(dialog_options, QFileDialog.Option):
+        dialog_options = QFileDialog.Option(dialog_options)
+    return QFileDialog.getExistingDirectory(parent, caption, directory, dialog_options)

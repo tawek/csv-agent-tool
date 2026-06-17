@@ -6,6 +6,7 @@ import pytest
 from PySide6.QtCore import Qt, QModelIndex
 from PySide6.QtWidgets import (
     QDialog,
+    QFileDialog,
     QFileSystemModel,
     QMessageBox,
     QTreeView,
@@ -122,6 +123,26 @@ class TestDirectoryManagement:
         assert len(emitted) == 0
         assert window._kb_directory is None
         assert window._dir_label.text() == "(not set)"
+
+    def test_file_dialog_uses_qfiledialog_option_type(self, monkeypatch) -> None:
+        """The directory wrapper passes a QFileDialog.Option value in production mode."""
+        captured: list[QFileDialog.Option] = []
+
+        def fake_get_existing_directory(parent, caption, directory, options):
+            captured.append(options)
+            return ""
+
+        file_dialog.set_test_mode(False)
+        monkeypatch.setattr(QFileDialog, "getExistingDirectory", fake_get_existing_directory)
+
+        try:
+            file_dialog.get_existing_directory(caption="Select", directory="/tmp")
+        finally:
+            file_dialog.set_test_mode(True)
+
+        assert captured
+        assert isinstance(captured[0], QFileDialog.Option)
+        assert captured[0] == QFileDialog.Option(0)
 
     def test_clear_directory_clears_and_emits(self, qtbot, tmp_path: Path) -> None:
         """Clearing the directory resets state and emits empty signal."""
