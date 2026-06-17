@@ -4,7 +4,7 @@
 
 Product Description Tool is a desktop batch editor for rewriting product descriptions from CSV data using large-language-model (LLM) backends. Users load CSV files, define prompt templates that map CSV input columns to generated HTML output columns, preview results inline, and export the processed CSV.
 
-The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-compatible providers, and is distributed as a packaged desktop binary via PyInstaller.
+The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-compatible providers, and is distributed as a packaged desktop binary via PyInstaller. The packaged Windows distribution includes an `install.bat` helper that copies the built app into `C:\apps\product-description-tool` while showing visible progress or status so the install does not appear stalled during large file copies.
 
 ## Use Case 1: Configure the Application
 
