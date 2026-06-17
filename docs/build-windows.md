@@ -137,13 +137,13 @@ ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-des
 
 The output includes:
 - `product-description-tool.exe` (~7 MB, the entry point)
-- `_internal/` (~110-130 MB with spec filters, all Qt DLLs, Python extensions, bundled packages)
+- `_internal/` (~240-250 MB with spec filters, all Qt DLLs, Python extensions, bundled packages including markitdown extras)
 
 **Verify size before upload:**
 
 ```bash
 du -sh "$BUILD_DIR/product-description-tool/"
-# Should be ~120 MB total. If ~550 MB+, the spec excludes were not applied — do NOT upload.
+# Should be ~250 MB total. If ~550 MB+, the spec excludes were not applied — do NOT upload.
 ```
 
 **Step 10 — Upload to Google Drive**
@@ -165,7 +165,7 @@ Verify completion:
 
 ```bash
 rclone size GoogleDrive:WFirma/product-description-tool/
-# Should report ~170-200 objects, ~120-140 MiB
+# Should report ~170-200 objects, ~240-250 MiB
 ```
 
 ---
@@ -200,7 +200,7 @@ ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-des
 
 # 7. Verify size before upload
 du -sh "$BUILD_DIR/product-description-tool/"
-# If >200 MB, abort — spec excludes were not applied correctly
+# If >450 MB, abort — spec excludes were not applied correctly
 
 # 8. Check token and upload
 rclone ls GoogleDrive:WFirma/product-description-tool/ > /dev/null 2>&1 || \
@@ -210,7 +210,7 @@ rclone copy "$BUILD_DIR/product-description-tool/" GoogleDrive:WFirma/product-de
 
 # 9. Verify size
 rclone size GoogleDrive:WFirma/product-description-tool/
-# Should report ~170-200 objects, ~120-140 MiB
+# Should report ~170-200 objects, ~240-250 MiB
 
 # 10. Clean up temp directory (only on success — leave on failure for post-mortem)
 rclone size GoogleDrive:WFirma/product-description-tool/ >/dev/null 2>&1 && rm -rf "$BUILD_DIR"
