@@ -71,39 +71,11 @@ When a feature needs deeper explanation than a short README note, add or extend 
 - Provider changes should preserve streaming and cancellation behavior for both Ollama and OpenAI-compatible endpoints.
 - When changing prompt rendering or CSV field handling, verify both persistence and UI-selection flows because `MainWindow` ties them together tightly.
 
-## Workflow: Spec-First, No Commits or Pushes Without Approval
+## Workflow: Spec-First Execution
 
 ### Golden Rule
 
-**NEVER commit code or push to remote without explicit user approval.** This is the single most important rule. Violating this is a critical failure.
-
-### Explicit Approval Definition
-
-**Explicit approval** means the user says one of:
-- "yes"
-- "approved"
-- "looks good"
-- "go ahead"
-- "commit" (only when asked about committing)
-- "push" (only when asked about pushing)
-
-**These do NOT count as approval:**
-- "run" — this means execute the tool
-- "go" — this means proceed with execution
-- "continue" — this means continue the current operation
-- "fix it" — this means fix the problem, not approve changes
-- "try" / "test" / "show" — any command that could mean "execute"
-- Silence or ambiguity — if unsure, ask
-
-When in doubt, **always ask**.
-
-### Approval Gates
-
-You must stop and ask for approval at each phase boundary. **Never proceed without explicit approval.**
-
-1. **After spec update:** Ask **"Does this spec change look correct? Shall I proceed to implementation?"**
-2. **After implementation:** Ask **"Does the implementation look correct? Shall I commit?"**
-3. **After commit:** Ask **"Shall I push?"** — only push when the user explicitly says "yes" to pushing.
+Follow the spec-first workflow for any feature, bug fix, or behavior change. Keep the user informed with concise progress updates, but do not require mandatory approval gates between spec, implementation, commit, and push unless the user explicitly asks for review pauses.
 
 ### Workflow Steps
 
@@ -116,13 +88,11 @@ You must stop and ask for approval at each phase boundary. **Never proceed witho
    - For new features: add a Use Case section describing the actor, trigger, flow, and invariants.
    - For bug fixes: update the relevant Use Case to describe the *correct* behavior.
    - For behavior modifications: update the affected Use Case(s).
-3. **Present the spec changes** to the user. Do not write any code. Do not commit anything.
-4. **Ask for approval.** Present the spec and ask: **"Does this spec change look correct? Shall I proceed to implementation?"**
-5. **Wait for explicit approval.** Do not proceed until the user says "yes", "approved", "looks good", or similar.
+3. **Present or summarize the spec changes** to the user before or alongside implementation work, depending on the task flow. Do not skip the spec update when one is required.
 
-#### Step 2: Implement (After Spec Approval)
+#### Step 2: Implement
 
-**Entry criteria:** The user has explicitly approved the spec change.
+**Entry criteria:** The relevant spec update has been made when required, or the change is confirmed to be implementation-only.
 
 1. **Make the minimum changes** needed to satisfy the spec. Follow existing patterns and conventions.
 2. **Write or update tests.** Cover the new or modified behavior, especially in `tests/test_main_window.py`.
@@ -130,25 +100,22 @@ You must stop and ask for approval at each phase boundary. **Never proceed witho
     ```bash
     QT_QPA_PLATFORM=offscreen PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE=1 uv run pytest
     ```
-4. **Show the code changes** and test results to the user. Reference the Use Case numbers and spec sections the implementation satisfies.
-5. **Ask for commit approval.** Present the changes and ask: **"Does the implementation look correct? Shall I commit?"**
-6. **Wait for explicit approval.** Do not commit until the user says "yes", "commit", "approved", or similar.
+4. **Show or summarize the code changes** and test results to the user. Reference the Use Case numbers and spec sections the implementation satisfies.
 
-#### Step 3: Commit (After Commit Approval)
+#### Step 3: Commit
 
-**Entry criteria:** The user has explicitly approved the commit.
+**Entry criteria:** The implementation is complete, validated, and ready to record in version control.
 
 1. Stage `docs/specification.md` and create the spec commit. Message should reference the Use Case number(s).
 2. Stage all code and test changes. Create the implementation commit. Message should reference the Use Case number(s) and note they follow the approved spec update.
 3. **Never combine spec and implementation in a single commit.**
 
-#### Step 4: Push (After Explicit Push Approval)
+#### Step 4: Push
 
-**Entry criteria:** The user has explicitly approved the push.
+**Entry criteria:** The relevant commits are complete and ready to publish.
 
-1. **Only push when the user explicitly says "push" or "yes" to a push question.**
-2. If the user has not been asked about pushing, ask: **"Shall I push?"**
-3. **Never push without this explicit approval.**
+1. Push when the task calls for updating the remote repository.
+2. Report the push result to the user, including any relevant branch or remote details.
 
 ### What Counts as a Spec Change
 
@@ -164,17 +131,17 @@ Only the following require a spec update:
 - Adding or removing comments
 - Refactoring internal code structure
 
-If unsure whether something needs a spec change, **ask the user**.
+If unsure whether something needs a spec change, prefer clarifying with the user.
 
 ### Bug Fix Variant
 
 For bug fixes:
 1. Update the spec to describe the *correct* behavior.
-2. Present the spec to the user and ask for approval.
-3. Implement the fix to match the approved spec.
+2. Present or summarize the spec change for the user.
+3. Implement the fix to match the updated spec.
 4. Add regression tests if appropriate.
-5. Show the implementation and ask for commit approval.
-6. Only commit and push after explicit approval.
+5. Show or summarize the implementation and validation results.
+6. Commit and push according to the normal workflow when the task calls for it.
 
 This ensures the spec always reflects the desired behavior, not whatever is currently broken.
 
@@ -191,3 +158,51 @@ For packaging-related changes, also run:
 ```bash
 uv run pyinstaller packaging/product_description_tool.spec
 ```
+
+## OpenCode Agent Configuration
+
+Agents are configured in `.opencode/agents/`. Each agent is self-contained with
+project-specific knowledge embedded in its system prompt.
+
+### Agent Files
+
+| File | Role | Model | Reasoning |
+|------|------|-------|-----------|
+| `leader.md` | Team Lead | `openai/gpt-5.4` | low |
+| `problem-solver.md` | Problem Solver | `openai/gpt-5.4` | high |
+| `code-architect.md` | Code Architect | `openai/gpt-5.4` | high |
+| `product-developer.md` | Product Developer (Senior) | `opencode/deepseek-v4-flash-free` | — |
+| `product-developer-junior.md` | Product Developer (Junior) | `llamacpp/qwen3.6-35b-a3b` | — |
+| `qa-engineer.md` | QA Engineer (Senior) | `opencode/deepseek-v4-flash-free` | — |
+| `code-explorer.md` | Code Explorer | `opencode/deepseek-v4-flash-free` | — |
+
+### Usage
+
+- **Primary agent**: `leader`
+- **Specialists**: `@product-developer`, `@product-developer-junior`, `@qa-engineer`, `@code-explorer`, `@problem-solver`, `@code-architect`
+
+### Persistent Outputs
+
+- **Specs and docs**: `docs/` (specification, project model, architecture, QA reports)
+- **Architecture docs**: `docs/architecture/<prefix>-*.md`
+- **QA reports**: `docs/qa/<prefix>-*.md`
+- **Analysis reports**: `docs/analysis/<prefix>-*.md`
+
+### Parallel Work Limits
+
+- `src/product_description_tool/` is a single shared implementation scope. Only one code-writing agent may edit it at a time.
+- `tests/` is a separate QA-owned scope. QA can work in parallel only after the intended behavior and any source-facing contracts are stable enough to test.
+- `docs/specification.md` and `docs/architecture/` are contract-defining artifacts. When a task changes behavior or shared interfaces, those artifacts must be updated before downstream implementation work starts.
+- If future work requires true parallel implementation lanes, refactor the source tree first into separately ownable directories or packages.
+
+### Permission Summary
+
+| Agent | read | edit | bash | task |
+|-------|------|------|------|------|
+| Leader | deny | deny | ask | `*`: allow |
+| Problem Solver | allow | deny | ask | deny |
+| Code Architect | allow | allow (`docs/specification.md`, `docs/architecture/`) | ask | deny |
+| Product Developer | allow | allow (`src/product_description_tool/`, `packaging/`) | ask | deny |
+| Product Developer (Junior) | allow | allow (`src/product_description_tool/`, `packaging/`) | ask | deny |
+| QA Engineer | allow | allow (tests/) | ask | deny |
+| Code Explorer | allow | deny | ask | deny |

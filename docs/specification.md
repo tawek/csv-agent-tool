@@ -48,7 +48,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 1. The application checks whether the current project has unsaved changes (`_project_modified`). If dirty, the user is prompted to save.
 2. On dismissal of the save prompt or after saving, a new `Project` is created with an empty `CsvConfig` derived from the current app config defaults.
 3. The in-memory `CsvDocument` is reset to empty headers and rows.
-4. The project path, external CSV path, and all filters are cleared.
+4. The project path, external CSV path, project-scoped knowledge-base directory, and all filters are cleared.
 5. The UI is refreshed: prompt controls, table view, and preview selectors are reset.
 
 **Postconditions:** A clean slate with no rows, no prompts, and no saved project file.
@@ -68,10 +68,10 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 1. The application checks for unsaved changes in the current session and prompts the user to save if dirty.
 2. A file dialog opens, pre-focused on the directory of the previously opened project.
 3. The user selects a `.project.json` file.
-4. The `ProjectRepository` loads the project definition, including all `ProjectPrompt` objects.
+4. The `ProjectRepository` loads the project definition, including all `ProjectPrompt` objects and the project's configured knowledge-base directory.
 5. For each prompt with a `prompt_file` sidecar, the prompt text is read from the sibling `.prompt.txt` file.
 6. The repository resolves the sibling CSV path (e.g., `catalog.project.json` maps to `catalog.csv`). If the sibling CSV exists, it is loaded using the project's `CsvConfig`. Otherwise, an empty `CsvDocument` is constructed from the project's field keys and prompt output fields.
-7. The current project, document, and paths are set. Filters are cleared.
+7. The current project, document, and paths are set. Any configured knowledge-base directory becomes the active project-scoped knowledge-base root. Filters are cleared.
 8. Prompt controls, table view, and preview selectors are refreshed.
 
 **Postconditions:** The project prompts, CSV data, and field metadata are all loaded and visible in the UI.
@@ -90,7 +90,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 1. For **Save As**, a file dialog prompts for a destination path. The path is normalized to end in `.project.json`.
 2. The `ProjectRepository.save()` method writes each prompt's text to a sidecar `.prompt.txt` file in the same directory.
-3. The project metadata (prompts, enabled states, prompt-to-output-column mapping, CSV config, field labels/visibility) is written to `*.project.json`.
+3. The project metadata (prompts, enabled states, prompt-to-output-column mapping, project-scoped knowledge-base directory, CSV config, field labels/visibility) is written to `*.project.json`.
 4. The working `CsvDocument` is written to the sibling `*.csv` file using the project's `CsvConfig`.
 5. The `project_path` is updated, and the dirty flag is cleared.
 
@@ -238,7 +238,19 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 1. Template text uses `{{column_name}}` placeholders that are substituted from CSV row data at processing time.
 2. On every change, the `ProjectPrompt.prompt` field is updated. The dirty flag is set.
-3. The template is validated (at process time) against the current document headers. Unknown placeholders cause an error dialog.
+3. Template text may use two placeholder forms:
+   - `{{column_name}}` references a CSV column or another prompt output field.
+   - `{{@relative/path.ext}}` references a knowledge-base file within the project's configured knowledge-base directory.
+4. Knowledge-base references are project-scoped:
+   - The knowledge-base directory is configured per project.
+   - Supported referenced file types are `.md`, `.markdown`, and `.csv`.
+   - Referenced paths are interpreted relative to the configured knowledge-base directory.
+   - Referenced paths must not escape the configured knowledge-base directory.
+   - Included file content is inserted verbatim into the rendered prompt and is not recursively rendered for additional placeholders.
+5. The template is validated before preview or batch processing starts:
+   - Unknown `{{column_name}}` placeholders cause an error dialog.
+   - Every `{{@...}}` reference must resolve to an existing supported file within the configured knowledge-base directory.
+   - Missing, unsupported, unreadable, or escaping knowledge-base references cause an error dialog and block preview and processing.
 
 **Postconditions:** The prompt template text is updated in the project definition and will be persisted on next save.
 
@@ -324,11 +336,15 @@ User clicks the minimize or maximize button in any pane header.
 
 **Trigger:** User selects a row in the table, selects a prompt, and clicks **Preview** (or selects **Process > Current** / presses Ctrl+Enter).
 
-**Preconditions:** At least one row is loaded. One prompt is selected and valid. The row's data satisfies all template placeholders.
+**Preconditions:** At least one row is loaded. One prompt is selected and valid. The row's data satisfies all template placeholders. Any referenced knowledge-base files resolve successfully within the project's configured knowledge-base directory.
 
 **Flow:**
 
-1. Validation runs: the document has rows, and the prompt template references only known headers.
+1. Validation runs before the worker is created:
+   - The document has rows.
+   - The prompt template references only known headers or prompt output fields where allowed.
+   - Every `{{@...}}` reference resolves to an existing supported file under the project's configured knowledge-base directory.
+   - If the prompt contains any missing, unsupported, unreadable, or escaping knowledge-base reference, preview is aborted and an error dialog is shown.
 2. A `GenerationWorker` is created on a `QThread` with the selected row and the single prompt.
 3. An `ActivityDialog` opens showing the provider, model, generation parameters, input/output character counts, and a progress indicator.
 4. The worker streams chunks from the provider back to the UI via signals. Each chunk is appended to the cell in the table model.
@@ -345,17 +361,21 @@ User clicks the minimize or maximize button in any pane header.
 
 **Trigger:** User clicks **Process** or selects **Process > All CSV Rows** (Ctrl+P).
 
-**Preconditions:** At least one prompt is enabled. Rows are loaded. Template validation passes.
+**Preconditions:** At least one prompt is enabled. Rows are loaded. Template validation passes, including validation of all referenced knowledge-base files.
 
 **Flow:**
 
-1. If the row count exceeds 10, a confirmation dialog warns the user that the run may take a long time.
-2. All rows (regardless of table filters) are collected as row specs.
-3. All enabled prompts are collected.
-4. An activity dialog opens. A worker is created on a background thread.
-5. For each prompt, the worker iterates over all rows, streaming chunks back to the UI. Each generated row updates the table model and the preview panel if the row is the currently selected one.
-6. The user may cancel at any time via the Cancel button in the activity dialog.
-7. On completion, the dirty flag is set for each row whose output changed.
+1. Before any worker is created, validation runs for all enabled prompts:
+   - Column and prompt-output placeholders must be valid.
+   - Every `{{@...}}` reference must resolve to an existing supported file under the project's configured knowledge-base directory.
+   - Missing, unsupported, unreadable, or escaping knowledge-base references abort processing and are reported before any row is processed.
+2. If the row count exceeds 10, a confirmation dialog warns the user that the run may take a long time.
+3. All rows (regardless of table filters) are collected as row specs.
+4. All enabled prompts are collected.
+5. An activity dialog opens. A worker is created on a background thread.
+6. For each prompt, the worker iterates over all rows, streaming chunks back to the UI. Each generated row updates the table model and the preview panel if the row is the currently selected one.
+7. The user may cancel at any time via the Cancel button in the activity dialog.
+8. On completion, the dirty flag is set for each row whose output changed.
 
 **Postconditions:** All enabled prompts have generated HTML in their output columns for every row in the CSV.
 
@@ -367,12 +387,12 @@ User clicks the minimize or maximize button in any pane header.
 
 **Trigger:** User clicks the dropdown arrow on the **Process** button and selects **Visible Rows** (or selects **Process > Visible Rows**).
 
-**Preconditions:** At least one prompt is enabled. Rows are loaded. Filters may be active.
+**Preconditions:** At least one prompt is enabled. Rows are loaded. Filters may be active. Template validation, including validation of all referenced knowledge-base files, passes.
 
 **Flow:**
 
 1. The application collects row specs by iterating over the proxy model's visible rows, mapping each back to its source row index.
-2. The same batch processing flow as Use Case 12 is followed, limited to the visible rows.
+2. The same validation and batch processing flow as Use Case 12 is followed, limited to the visible rows.
 
 **Postconditions:** Only visible (unfiltered) rows are processed for enabled prompts.
 
@@ -488,7 +508,7 @@ User clicks the minimize or maximize button in any pane header.
 
 **Actor:** User
 
-**Description:** The user works with the project's on-disk representation, which consists of a `.project.json` manifest, a sibling `.csv` data file, and per-prompt `.prompt.txt` sidecar files.
+**Description:** The user works with the project's on-disk representation, which consists of a `.project.json` manifest, a sibling `.csv` data file, per-prompt `.prompt.txt` sidecar files, and an optional project-scoped knowledge-base directory reference.
 
 **Trigger:** Saving or opening a project.
 
@@ -497,10 +517,14 @@ User clicks the minimize or maximize button in any pane header.
 **Flow:**
 
 1. **On save:** Each prompt's text is written to `{output_field_sanitized}.prompt.txt` in the project directory. The project manifest is written to `*.project.json`. The sibling CSV is written to `*.csv`.
-2. **On load:** Prompts with `prompt_file` references have their text read from sidecars. The sibling CSV is loaded if present.
-3. Column naming: prompt output fields are sanitized to alphanumeric, dot, underscore, and hyphen characters, replacing all others with underscores.
+2. **Knowledge-base directory persistence:**
+   - A project may store a configured knowledge-base directory in its manifest.
+   - When possible, the stored knowledge-base directory path is relative to the `.project.json` file location.
+   - If a relative representation is not possible, an absolute path may be stored.
+3. **On load:** Prompts with `prompt_file` references have their text read from sidecars. The sibling CSV is loaded if present. If a knowledge-base directory is configured, it is resolved relative to the project file when stored as a relative path.
+4. Column naming: prompt output fields are sanitized to alphanumeric, dot, underscore, and hyphen characters, replacing all others with underscores.
 
-**Postconditions:** The project's on-disk layout is consistent and reconstructible.
+**Postconditions:** The project's on-disk layout is consistent and reconstructible, including its project-scoped knowledge-base directory setting.
 
 ## Use Case 20: Exit the Application
 
@@ -552,7 +576,7 @@ User clicks the minimize or maximize button in any pane header.
 
 **Actor:** User
 
-**Description:** When processing multiple prompts, the application detects dependencies between them (where one prompt's template references another prompt's output column) and processes them in the correct order.
+**Description:** When processing multiple prompts, the application detects dependencies between them (where one prompt's template references another prompt's output column) and processes them in the correct order. Knowledge-base file references do not participate in prompt dependency ordering.
 
 **Trigger:** Automatic when the user initiates batch processing (Process All, Process Visible Rows, or Preview).
 
@@ -563,6 +587,7 @@ User clicks the minimize or maximize button in any pane header.
 1. Before starting processing, the application builds a dependency graph among enabled prompts:
    - For each prompt, extract all placeholders from its template using `PromptRenderer.extract_placeholders()`.
    - If a placeholder matches the `output_field` of another enabled prompt, a dependency edge is created (this prompt depends on the referenced prompt).
+   - `{{@...}}` knowledge-base references are excluded from the graph and never create dependency edges.
 2. The application computes a topological ordering of the prompts based on the dependency graph:
    - Prompts with no dependencies are processed first.
    - A prompt is processed only after all its dependencies have been processed.
@@ -583,6 +608,7 @@ User clicks the minimize or maximize button in any pane header.
 - Only enabled prompts participate in the dependency graph.
 - The dependency ordering is ephemeral — it is computed fresh for each processing run and not persisted in the project file.
 - A prompt is considered dependent on another prompt if its template contains a placeholder matching the other prompt's `output_field` name.
+- Knowledge-base file references are project-scoped prompt inputs, not prompt dependencies.
 
 ## Architecture Summary
 
@@ -592,8 +618,8 @@ User clicks the minimize or maximize button in any pane header.
 |---|---|---|
 | `MainWindow` | `main_window.py` | UI orchestration, menu actions, CSV/project workflows, previews, batch processing control |
 | `ConfigStore` | `config.py` | Persistent app-level JSON configuration (provider, generation, CSV settings) |
-| `Project` | `project.py` | In-memory project definition: prompts + CSV config |
-| `ProjectRepository` | `project.py` | Read/write `.project.json` and `.prompt.txt` sidecars |
+| `Project` | `project.py` | In-memory project definition: prompts + CSV config + optional knowledge-base directory |
+| `ProjectRepository` | `project.py` | Read/write `.project.json`, `.prompt.txt` sidecars, and project-scoped knowledge-base directory metadata |
 | `CsvDocument` | `csv_repository.py` | Live row data with headers, dialect, source path |
 | `CsvRepository` | `csv_repository.py` | Read/write arbitrary CSV files using `CsvConfig` |
 | `GenerationService` | `generation.py` | Prompt template rendering and row-level generation orchestration |
@@ -617,11 +643,13 @@ User clicks the minimize or maximize button in any pane header.
 - The sibling CSV file (`*.csv`) and the `.project.json` form a single project unit. They are saved and loaded together.
 - Filtering affects the table view display and the scope of "Process Visible Rows". It does not modify or remove data.
 - Prompt templates can reference any CSV column by name via `{{column_name}}` placeholders.
+- Prompt templates can also reference project-scoped knowledge-base files via `{{@relative/path.ext}}`; only `.md`, `.markdown`, and `.csv` files are supported, paths are resolved relative to the configured knowledge-base directory, escaping that directory is forbidden, and included content is inserted verbatim without recursive rendering.
 - The default CSV delimiter is `;` (semicolon). New projects and fresh installs use this delimiter unless the user changes it in Settings.
 - Generation parameters (temperature, top_p, max_output_tokens) apply to all providers and are shared across prompts in a single run.
 - The dirty flag (`_project_modified`) tracks unsaved changes and triggers save prompts on project switches.
 - Each field in `FieldConfig` may have `strip_html_whitespace=True`, which normalizes consecutive whitespace in the cell value to a single space during CSV export.
 - Prompt dependency ordering is computed at processing time: enabled prompts are topologically sorted by output-field dependencies, and cycles are detected before processing begins.
+- Knowledge-base reference validation runs before preview or processing starts; missing, unsupported, unreadable, or escaping references block the run.
 - The pane maximize toggle is purely cosmetic: it hides the other two panes, expands the selected pane, and restores previous panel states on unmaximize.
 
 ### Data Flow
@@ -636,6 +664,7 @@ User adds prompt
   → FieldConfig created → Table columns expanded
 
 User previews / processes
+  → Validate CSV placeholders + knowledge-base references (exist, supported type, within KB root)
   → Prompt dependency graph built and topologically sorted (or cycle detected)
   → GenerationService.prepare_prompt() → PromptRenderer.render()
   → ProviderClient.generate() → Streaming chunks
