@@ -552,6 +552,82 @@ class TestBoundaryEnforcement:
         assert len(critical_messages) == 1
         assert "Access denied" in critical_messages[0][0]
 
+    def test_copy_rejects_destination_escape(
+        self, qtbot, kb_dir: Path, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Copy with a path-traversal destination name is rejected."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        # Select a file inside the KB root
+        faq_index = window._model.index(str(kb_dir / "faq.md"))
+        window._tree.selectionModel().select(
+            faq_index,
+            window._tree.selectionModel().SelectionFlag.Select,
+        )
+
+        critical_messages = []
+
+        def fake_critical(parent, title, text, *args, **kwargs):
+            critical_messages.append((title, text))
+            return QMessageBox.StandardButton.Ok
+
+        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+
+        # User enters a path-traversal name
+        monkeypatch.setattr(
+            QInputDialog,
+            "getText",
+            lambda *args, **kwargs: ("../outside_copy.txt", True),
+        )
+
+        window._copy_selected()
+
+        # Must show Access denied — destination escapes KB root
+        assert len(critical_messages) == 1
+        assert "Access denied" in critical_messages[0][0]
+        # No file should have been created outside the KB root
+        assert not (kb_dir.parent / "outside_copy.txt").exists()
+
+    def test_rename_rejects_destination_escape(
+        self, qtbot, kb_dir: Path, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Rename with a path-traversal destination name is rejected."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        # Select a file inside the KB root
+        faq_index = window._model.index(str(kb_dir / "faq.md"))
+        window._tree.selectionModel().select(
+            faq_index,
+            window._tree.selectionModel().SelectionFlag.Select,
+        )
+
+        critical_messages = []
+
+        def fake_critical(parent, title, text, *args, **kwargs):
+            critical_messages.append((title, text))
+            return QMessageBox.StandardButton.Ok
+
+        monkeypatch.setattr(QMessageBox, "critical", fake_critical)
+
+        # User enters a path-traversal name
+        monkeypatch.setattr(
+            QInputDialog,
+            "getText",
+            lambda *args, **kwargs: ("../renamed_escape.md", True),
+        )
+
+        window._rename_selected()
+
+        # Must show Access denied — destination escapes KB root
+        assert len(critical_messages) == 1
+        assert "Access denied" in critical_messages[0][0]
+        # Original file must still exist (rename was blocked)
+        assert (kb_dir / "faq.md").exists()
+        # No file should have been created outside the KB root
+        assert not (kb_dir.parent / "renamed_escape.md").exists()
+
     def test_delete_refuses_outside_path(
         self, qtbot, kb_dir: Path, tmp_path: Path, monkeypatch
     ) -> None:
@@ -1067,3 +1143,59 @@ def test_delete_on_close_attribute(qtbot) -> None:
     window = KnowledgeBaseManager(kb_directory=None)
     qtbot.addWidget(window)
     assert not window.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+
+# ===================================================================
+# Close button (UC21 step 9 — menu simplification follow-up)
+# ===================================================================
+
+
+class TestCloseButton:
+    """UC21: The KB manager has a Close button that closes the window."""
+
+    def test_close_button_exists(self, qtbot) -> None:
+        """The Close button is present and properly labelled."""
+        from PySide6.QtWidgets import QPushButton
+
+        window = KnowledgeBaseManager(kb_directory=None)
+        qtbot.addWidget(window)
+
+        assert hasattr(window, "_close_button")
+        assert isinstance(window._close_button, QPushButton)
+        assert window._close_button.text() == "Close"
+
+    def test_close_button_always_enabled(self, qtbot) -> None:
+        """The Close button is always enabled regardless of KB directory state."""
+        window = KnowledgeBaseManager(kb_directory=None)
+        qtbot.addWidget(window)
+
+        # Enabled even with no KB dir
+        assert window._close_button.isEnabled() is True
+
+    def test_close_button_closes_window(self, qtbot, kb_dir: Path) -> None:
+        """Clicking Close hides the non-modal window (WA_DeleteOnClose is False)."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+        window.show()
+
+        assert window.isVisible()
+
+        window._close_button.click()
+
+        # WA_DeleteOnClose is False, so close() hides rather than destroys
+        assert window.isHidden() is True
+
+    def test_close_button_click_emits_accepted(self, qtbot, kb_dir: Path) -> None:
+        """The Close button calls QDialog.close() — the rejected signal is
+        not required, but the dialog should not be modal so close() works
+        as a window-close (hide)."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+        window.show()
+
+        with qtbot.waitSignal(window.finished, timeout=500, raising=False):
+            window._close_button.click()
+
+        # close() on a non-modal QDialog emits finished(int) with QDialog.Rejected
+        # as the result code; since WA_DeleteOnClose is False the widget survives.
+        assert window.isHidden()

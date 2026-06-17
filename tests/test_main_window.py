@@ -1035,78 +1035,81 @@ def test_panel_grow_temp_minimized_restores_maximized_and_other_temp_min(
 class TestKnowledgeBaseDirectoryUI:
     """UI-level tests for the knowledge-base directory feature."""
 
-    def test_set_kb_directory_updates_project_and_indicator(
-        self, qtbot, tmp_path: Path, monkeypatch,
+    def test_kb_manager_action_opens_manager_window(
+        self, qtbot, tmp_path: Path,
     ) -> None:
+        """Clicking the single Knowledge Base menu action opens the KB manager."""
+        from product_description_tool.kb_window import KnowledgeBaseManager
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        # Initially no manager window exists
+        assert window._kb_manager is None
+
+        # Trigger the single KB action — must open the manager
+        window.kb_manager_action.trigger()
+
+        assert window._kb_manager is not None
+        assert isinstance(window._kb_manager, KnowledgeBaseManager)
+        assert window._kb_manager.isVisible()
+
+    def test_kb_manager_action_raises_existing_window(
+        self, qtbot, tmp_path: Path,
+    ) -> None:
+        """Triggering the action a second time reuses the existing window."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        window.kb_manager_action.trigger()
+        first_manager = window._kb_manager
+
+        window.kb_manager_action.trigger()
+        # Same instance — not replaced
+        assert window._kb_manager is first_manager
+
+    def test_kb_on_directory_changed_updates_project_and_indicator(
+        self, qtbot, tmp_path: Path,
+    ) -> None:
+        """The _on_kb_directory_changed slot updates project and label."""
         window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
         qtbot.addWidget(window)
         window.show()
 
         kb_dir = tmp_path / "my_kb"
         kb_dir.mkdir()
-        monkeypatch.setattr(
-            "product_description_tool.main_window.QFileDialog.getExistingDirectory",
-            lambda *args, **kwargs: str(kb_dir),
-        )
 
-        window._set_kb_directory()
+        window._on_kb_directory_changed(str(kb_dir))
 
         assert window.project.knowledge_base_dir == str(kb_dir)
         assert window.kb_label.text() == f"KB: {kb_dir}"
         assert window.kb_label.toolTip() == str(kb_dir)
         assert window.isWindowModified()
 
-    def test_set_kb_directory_cancelled_does_nothing(
-        self, qtbot, tmp_path: Path, monkeypatch,
-    ) -> None:
-        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
-        qtbot.addWidget(window)
-        window.show()
-
-        monkeypatch.setattr(
-            "product_description_tool.main_window.QFileDialog.getExistingDirectory",
-            lambda *args, **kwargs: "",
-        )
-
-        original_kb = window.project.knowledge_base_dir
-        window._set_kb_directory()
-
-        assert window.project.knowledge_base_dir == original_kb
-        assert not window.isWindowModified()
-
-    def test_clear_kb_directory_clears_project_and_indicator(
+    def test_kb_on_directory_cleared_updates_project_and_indicator(
         self, qtbot, tmp_path: Path,
     ) -> None:
+        """Calling _on_kb_directory_changed('') clears the KB project field and label."""
         window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
         qtbot.addWidget(window)
         window.show()
 
-        window.project.knowledge_base_dir = str(tmp_path / "some_kb")
-        window._set_project_modified(False)
+        # Set a KB dir first so there's something to clear
+        kb_dir = tmp_path / "some_kb"
+        kb_dir.mkdir()
+        window.project.knowledge_base_dir = str(kb_dir)
         window._update_kb_indicator()
-
+        window._set_project_modified(False)
         assert window.kb_label.text() != ""
 
-        window._clear_kb_directory()
+        window._on_kb_directory_changed("")
 
         assert window.project.knowledge_base_dir is None
         assert window.kb_label.text() == ""
         assert window.kb_label.toolTip() == ""
         assert window.isWindowModified()
-
-    def test_clear_kb_directory_when_already_none_does_nothing(
-        self, qtbot, tmp_path: Path,
-    ) -> None:
-        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
-        qtbot.addWidget(window)
-        window.show()
-
-        assert window.project.knowledge_base_dir is None
-        window._set_project_modified(False)
-
-        window._clear_kb_directory()
-
-        assert not window.isWindowModified()
 
     def test_new_project_clears_kb_directory(
         self, qtbot, tmp_path: Path, monkeypatch,
@@ -1166,24 +1169,6 @@ class TestKnowledgeBaseDirectoryUI:
         # after loading. The KB directory should be restored.
         assert window.project.knowledge_base_dir is not None
         assert Path(window.project.knowledge_base_dir).resolve() == kb_dir.resolve()
-
-    def test_kb_directory_dirty_flag_on_set(
-        self, qtbot, tmp_path: Path, monkeypatch,
-    ) -> None:
-        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
-        qtbot.addWidget(window)
-        window.show()
-
-        kb_dir = tmp_path / "kb"
-        kb_dir.mkdir()
-        monkeypatch.setattr(
-            "product_description_tool.main_window.QFileDialog.getExistingDirectory",
-            lambda *args, **kwargs: str(kb_dir),
-        )
-
-        assert not window.isWindowModified()
-        window._set_kb_directory()
-        assert window.isWindowModified()
 
     def test_validation_blocks_preview_when_kb_refs_exist_but_no_kb_dir(
         self, qtbot, tmp_path: Path, monkeypatch,

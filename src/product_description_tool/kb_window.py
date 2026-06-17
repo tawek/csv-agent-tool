@@ -130,6 +130,10 @@ class KnowledgeBaseManager(QDialog):
         self._delete_button.clicked.connect(self._delete_selected)
         actions_row.addWidget(self._delete_button)
 
+        self._close_button = QPushButton("Close")
+        self._close_button.clicked.connect(self.close)
+        actions_row.addWidget(self._close_button)
+
         layout.addLayout(actions_row)
 
         # -- Context menu ----------------------------------------------
@@ -396,8 +400,11 @@ class KnowledgeBaseManager(QDialog):
         if not accepted or not new_name.strip():
             return
         target = source.parent / new_name.strip()
-        # The target stays in the same directory, so it is automatically
-        # within the KB root if the source is.
+        try:
+            self._assert_within_kb_root(target)
+        except ValueError as exc:
+            QMessageBox.critical(self, "Access denied", str(exc))
+            return
         try:
             if source.is_dir():
                 shutil.copytree(source, target)
@@ -431,6 +438,11 @@ class KnowledgeBaseManager(QDialog):
         if not accepted or not new_name.strip():
             return
         target = source.parent / new_name.strip()
+        try:
+            self._assert_within_kb_root(target)
+        except ValueError as exc:
+            QMessageBox.critical(self, "Access denied", str(exc))
+            return
         try:
             source.rename(target)
         except Exception as exc:  # noqa: BLE001
