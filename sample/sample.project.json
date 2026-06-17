@@ -1,0 +1,95 @@
+{
+  "prompts": [
+    {
+      "output-field": "output",
+      "prompt": "tell me some shit about the product so that it is so funny that I shit myself when I read it.\n\nbe cheeky\n\nbe irresponsible\n\nbe more intelligent then an average person reading this\n\nput double meaning, puns and play with the idea of writing the most ludicrous text ever ",
+      "enabled": true,
+      "prompt-file": "output.prompt.md",
+      "attachments": [
+        {
+          "source-type": "csv_column",
+          "source": "sku"
+        },
+        {
+          "source-type": "csv_column",
+          "source": "name"
+        },
+        {
+          "source-type": "csv_column",
+          "source": "category"
+        },
+        {
+          "source-type": "csv_column",
+          "source": "price"
+        },
+        {
+          "source-type": "csv_column",
+          "source": "description"
+        }
+      ]
+    }
+  ],
+  "csv": {
+    "import_settings": {
+      "delimiter": ",",
+      "quotechar": "\"",
+      "encoding": "utf-8",
+      "newline": "\n"
+    },
+    "export_settings": {
+      "delimiter": ";",
+      "quotechar": "\"",
+      "encoding": "utf-8-sig",
+      "newline": "",
+      "write_header": true,
+      "export-path": "",
+      "export-only-visible": true,
+      "export-order": [
+        "sku",
+        "name",
+        "category",
+        "price",
+        "description",
+        "sss"
+      ],
+      "fields": {
+        "sku": {
+          "label": "sku",
+          "show": true,
+          "strip_html_whitespace": false
+        },
+        "name": {
+          "label": "name",
+          "show": true,
+          "strip_html_whitespace": false
+        },
+        "category": {
+          "label": "category",
+          "show": true,
+          "strip_html_whitespace": false
+        },
+        "price": {
+          "label": "price",
+          "show": true,
+          "strip_html_whitespace": false
+        },
+        "description": {
+          "label": "description",
+          "show": true,
+          "strip_html_whitespace": false
+        },
+        "sss": {
+          "label": "sss",
+          "show": true,
+          "strip_html_whitespace": false
+        },
+        "output": {
+          "label": "output",
+          "show": true,
+          "strip_html_whitespace": false
+        }
+      }
+    },
+    "export_settings_initialized": true
+  }
+}

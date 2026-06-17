@@ -132,7 +132,7 @@ def _make_kb_relative(kb_directory: str, project_dir: Path) -> str:
 
 def _prompt_filename(output_field: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", output_field).strip("._") or "prompt"
-    return f"{sanitized}.prompt.txt"
+    return f"{sanitized}.prompt.md"
 
 
 class ProjectRepository:
