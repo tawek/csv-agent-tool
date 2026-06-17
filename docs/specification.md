@@ -49,8 +49,8 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 1. The application checks whether the current project has unsaved changes (`_project_modified`). If dirty, the user is prompted to save.
 2. On dismissal of the save prompt or after saving, a new `Project` is created with an empty `CsvConfig` derived from the current app config defaults.
 3. The in-memory `CsvDocument` is reset to empty headers and rows.
-4. The project path, external CSV path, project-scoped knowledge-base directory, and all filters are cleared.
-5. The UI is refreshed: prompt controls, the reusable prompt editor, table view, preview selectors, and knowledge-base management state are reset.
+4. The project path, external CSV path, project-scoped knowledge-base directory, prompt-attachment metadata, and all filters are cleared.
+5. The UI is refreshed: prompt controls, the reusable prompt editor, prompt-attachment management state, table view, preview selectors, and knowledge-base management state are reset.
 
 **Postconditions:** A clean slate with no rows, no prompts, and no saved project file.
 
@@ -69,11 +69,11 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 1. The application checks for unsaved changes in the current session and prompts the user to save if dirty.
 2. A file dialog opens, pre-focused on the directory of the previously opened project.
 3. The user selects a `.project.json` file.
-4. The `ProjectRepository` loads the project definition, including all `ProjectPrompt` objects and the project's configured knowledge-base directory.
+4. The `ProjectRepository` loads the project definition, including all `ProjectPrompt` objects, each prompt's attachment metadata, and the project's configured knowledge-base directory.
 5. For each prompt with a `prompt_file` sidecar, the prompt text is read from the sibling `.prompt.txt` file.
 6. The repository resolves the sibling CSV path (e.g., `catalog.project.json` maps to `catalog.csv`). If the sibling CSV exists, it is loaded using the project's `CsvConfig`. Otherwise, an empty `CsvDocument` is constructed from the project's field keys and prompt output fields.
 7. The current project, document, and paths are set. Any configured knowledge-base directory becomes the active project-scoped knowledge-base root. Filters are cleared.
-8. Prompt controls, the reusable prompt editor, table view, preview selectors, and knowledge-base management state are refreshed.
+8. Prompt controls, the reusable prompt editor, prompt-attachment management state, table view, preview selectors, and knowledge-base management state are refreshed.
 
 **Postconditions:** The project prompts, CSV data, and field metadata are all loaded and visible in the UI.
 
@@ -91,7 +91,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 1. For **Save As**, a file dialog prompts for a destination path. The path is normalized to end in `.project.json`.
 2. The `ProjectRepository.save()` method writes each prompt's text to a sidecar `.prompt.txt` file in the same directory.
-3. The project metadata (prompts, enabled states, prompt-to-output-column mapping, project-scoped knowledge-base directory, CSV config, and field metadata including labels, visibility, whitespace-stripping flags, and export column order) is written to `*.project.json`.
+3. The project metadata (prompts, enabled states, prompt-to-output-column mapping, per-prompt attachment metadata, project-scoped knowledge-base directory, CSV config, and field metadata including labels, visibility, whitespace-stripping flags, and export column order) is written to `*.project.json`.
 4. The working `CsvDocument` is written to the sibling `*.csv` file using the project's `CsvConfig`.
 5. The `project_path` is updated, and the dirty flag is cleared.
 
@@ -248,22 +248,75 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 1. Template text uses `{{column_name}}` placeholders that are substituted from CSV row data at processing time.
 2. The prompt editor is a reusable embedded markdown-capable text editor. It supports plain-text prompt editing in the Prompts panel and provides markdown syntax highlighting while the user edits.
-3. On every change, the `ProjectPrompt.prompt` field is updated. The dirty flag is set.
-4. Template text may use two placeholder forms:
+3. Prompt attachments are managed separately from prompt text so the main prompt editor stays focused on authoring the template itself.
+4. On every change, the `ProjectPrompt.prompt` field is updated. The dirty flag is set.
+5. Template text may use two placeholder forms:
    - `{{column_name}}` references a CSV column or another prompt output field.
    - `{{@relative/path.ext}}` references a knowledge-base file within the project's configured knowledge-base directory.
-5. Knowledge-base references are project-scoped:
+6. Knowledge-base references are project-scoped:
    - The knowledge-base directory is configured per project.
-   - Supported referenced file types are `.md`, `.markdown`, and `.csv`.
+   - Supported referenced file types include directly readable text formats (`.md`, `.markdown`, `.txt`, `.csv`) and additional local file types that the application's MarkItDown-backed conversion capability can successfully convert to Markdown for prompt use.
    - Referenced paths are interpreted relative to the configured knowledge-base directory.
    - Referenced paths must not escape the configured knowledge-base directory.
+   - Directly readable text formats are inserted from the source file contents.
+   - Convertible non-text formats are inserted from their converted Markdown representation.
+   - Converted output may be reused from a transparent local cache keyed by the current source file content; when the source file changes, the application regenerates the converted Markdown before use.
    - Included file content is inserted verbatim into the rendered prompt and is not recursively rendered for additional placeholders.
-6. The template is validated before preview or batch processing starts:
+7. The template is validated before preview or batch processing starts:
    - Unknown `{{column_name}}` placeholders cause an error dialog.
    - Every `{{@...}}` reference must resolve to an existing supported file within the configured knowledge-base directory.
-   - Missing, unsupported, unreadable, or escaping knowledge-base references cause an error dialog and block preview and processing.
+   - If a referenced file requires conversion, the application's MarkItDown integration must be available and working before preview or processing starts.
+   - Missing, unsupported, unreadable, escaping, conversion-unavailable, or conversion-failed knowledge-base references cause an error dialog and block preview and processing.
 
 **Postconditions:** The prompt template text is updated in the project definition and will be persisted on next save.
+
+## Use Case 28: Manage Prompt Attachments
+
+**Actor:** User
+
+**Description:** The user manages structured prompt attachments for the selected prompt without embedding those sources directly in the prompt text.
+
+**Trigger:** User opens the selected prompt's attachment management UI from the Prompts area.
+
+**Preconditions:** A prompt is selected.
+
+**Flow:**
+
+1. The main prompt editor remains dedicated to prompt text. Attachment editing is opened in a separate attachment-management dialog or window so the Prompts panel stays uncluttered.
+2. The attachment-management UI lists the selected prompt's attachments in their current persisted order.
+3. Each attachment is metadata, not prompt text. Each attachment records:
+   - a source type of either knowledge-base file or CSV column,
+   - a source identifier (knowledge-base relative path or CSV column name), and
+   - its order within the prompt's attachment list.
+4. The user may add attachments through separate source-specific selection flows rather than one mixed picker.
+5. The attachment manager exposes distinct add actions or an equivalent explicit source-type choice for the two supported source types:
+   - **Add knowledge-base file attachment** opens a small modal select-only knowledge-base-file picker rooted at the project's configured knowledge-base directory. This flow behaves like a simplified knowledge-base explorer for choosing supported files.
+   - **Add CSV-column attachment** opens a small modal column-selection flow specialized for CSV columns, such as a dedicated list or dropdown of available columns.
+6. The application must not present CSV columns as a virtual knowledge-base branch, folder, or directory analogue. Knowledge-base files and CSV columns remain separate concepts in the selection UX even though both become attachments in the same ordered list.
+7. Knowledge-base-file attachment selection may include both directly readable knowledge-base files and non-editable local files that the application can convert to Markdown for prompt use.
+8. Each add flow may support selecting one or more sources of its own type in a single confirmation.
+9. When the user confirms an add action, the chosen sources are inserted into the selected prompt's attachment list in a default order that places knowledge-base-file attachments before CSV-column attachments so the effective prompt's knowledge-base prefix remains stable by default.
+   - Adding one or more knowledge-base-file attachments places those new file attachments after any existing knowledge-base-file attachments and before any existing CSV-column attachments.
+   - Adding one or more CSV-column attachments places those new column attachments after all existing attachments.
+   - Within a single add action, the chosen sources preserve the order returned by that source-specific selection flow unless the user later reorders them.
+10. The user may remove any existing attachment from the list.
+11. The user may reorder attachments within the list, including moving CSV-column attachments above knowledge-base-file attachments. The displayed order is the effective processing order.
+12. Attachment changes update the selected prompt's metadata and mark the project dirty.
+13. If the effective order places any CSV-column attachment before any knowledge-base-file attachment, the attachment-management UI shows a small fine-print warning that this arrangement may increase prompt cost because knowledge-base-file content may need to be reprocessed instead of benefiting from stable-prefix caching.
+
+**Postconditions:** The selected prompt has an ordered attachment list stored as prompt metadata, separate from the prompt text.
+
+**Error conditions:**
+- If the user tries to add a knowledge-base-file attachment when no project knowledge-base directory is configured, the add flow is blocked and the user is informed.
+- If the user tries to execute a prompt whose selected knowledge-base-file attachment requires conversion but the MarkItDown integration is unavailable or failing, the application warns that the file cannot be included and blocks the run rather than silently omitting it.
+- If no valid selectable sources exist for the requested source type, that source-specific add flow may open in an empty state or its add action may be disabled, but the application must not create invalid attachment entries silently.
+
+**Invariants:**
+- Prompt attachments are additive prompt metadata and do not rewrite or inject text into the saved prompt template.
+- Existing inline placeholder behavior remains supported: `{{column}}` and `{{@path}}` keep their current meaning and may still be used even when prompt attachments are configured.
+- Attachment order is user-controlled and persists across project save/load cycles.
+- The attachment-management UX keeps knowledge-base-file selection and CSV-column selection as separate flows; the application must not rely on a single mixed source picker or a virtualized "columns as knowledge-base tree nodes" model.
+- The default attachment insertion behavior prefers knowledge-base-file attachments before CSV-column attachments, but users may override that order manually.
 
 ## Use Case 25: Panel Layout Management
 
@@ -332,20 +385,28 @@ User clicks the `+` or `-` button in any pane header.
 
 **Trigger:** User selects a row in the table, selects a prompt, and clicks **Preview** (or selects **Process > Current** / presses Ctrl+Enter).
 
-**Preconditions:** At least one row is loaded. One prompt is selected and valid. The row's data satisfies all template placeholders. Any referenced knowledge-base files resolve successfully within the project's configured knowledge-base directory.
+**Preconditions:** At least one row is loaded. One prompt is selected and valid. The row's data satisfies all template placeholders and attachment references. Any referenced knowledge-base files resolve successfully within the project's configured knowledge-base directory.
 
 **Flow:**
 
 1. Validation runs before the worker is created:
-   - The document has rows.
-   - The prompt template references only known headers or prompt output fields where allowed.
-   - Every `{{@...}}` reference resolves to an existing supported file under the project's configured knowledge-base directory.
-   - If the prompt contains any missing, unsupported, unreadable, or escaping knowledge-base reference, preview is aborted and an error dialog is shown.
+    - The document has rows.
+    - The prompt template references only known headers or prompt output fields where allowed.
+    - Every `{{@...}}` reference resolves to an existing supported file under the project's configured knowledge-base directory.
+    - Every knowledge-base-file attachment resolves to an existing supported file under the project's configured knowledge-base directory.
+    - Every CSV-column attachment references an existing current CSV header or current prompt output column available in the working document.
+    - If the prompt contains any missing, unsupported, unreadable, or escaping knowledge-base reference, preview is aborted and an error dialog is shown.
+    - If the prompt contains any missing or invalid attachment source, preview is aborted and an error dialog is shown identifying the invalid attachment.
 2. A `GenerationWorker` is created on a `QThread` with the selected row and the single prompt.
-3. An `ActivityDialog` opens showing the provider, model, generation parameters, input/output character counts, and a progress indicator.
-4. The worker streams chunks from the provider back to the UI via signals. Each chunk is appended to the cell in the table model.
-5. The description preview panel on the right updates live with the generated HTML.
-6. On completion, cancellation, or failure, the activity dialog is closed and the status bar shows the result.
+3. Before provider generation starts, the application builds the effective prompt by rendering the prompt template as usual and then appending each configured attachment automatically in attachment order.
+    - Appended attachment content includes provenance/context that makes clear it is an attachment and identifies its source.
+    - Knowledge-base-file attachments append the referenced file contents using the attachment's relative path as provenance.
+    - CSV-column attachments append the current row's value for the referenced column using the column name as provenance.
+    - The default attachment ordering behavior is intended to keep knowledge-base-file content earlier than row-varying CSV-column content so the prompt prefix stays more stable by default, though user-defined reordering still takes precedence.
+4. An `ActivityDialog` opens showing the provider, model, generation parameters, input/output character counts, and a progress indicator.
+5. The worker streams chunks from the provider back to the UI via signals. Each chunk is appended to the cell in the table model.
+6. The description preview panel on the right updates live with the generated HTML.
+7. On completion, cancellation, or failure, the activity dialog is closed and the status bar shows the result.
 
 **Postconditions:** The selected row's output column contains the generated HTML fragment.
 
@@ -357,21 +418,26 @@ User clicks the `+` or `-` button in any pane header.
 
 **Trigger:** User clicks **Process** or selects **Process > All CSV Rows** (Ctrl+P).
 
-**Preconditions:** At least one prompt is enabled. Rows are loaded. Template validation passes, including validation of all referenced knowledge-base files.
+**Preconditions:** At least one prompt is enabled. Rows are loaded. Template and attachment validation pass, including validation of all referenced knowledge-base files.
 
 **Flow:**
 
 1. Before any worker is created, validation runs for all enabled prompts:
-   - Column and prompt-output placeholders must be valid.
-   - Every `{{@...}}` reference must resolve to an existing supported file under the project's configured knowledge-base directory.
-   - Missing, unsupported, unreadable, or escaping knowledge-base references abort processing and are reported before any row is processed.
+    - Column and prompt-output placeholders must be valid.
+    - Every `{{@...}}` reference must resolve to an existing supported file under the project's configured knowledge-base directory.
+    - Every knowledge-base-file attachment must resolve to an existing supported file under the project's configured knowledge-base directory.
+    - Every CSV-column attachment must reference an existing current CSV header or current prompt output column available in the working document.
+    - Missing, unsupported, unreadable, or escaping knowledge-base references abort processing and are reported before any row is processed.
+    - Missing attachment sources or invalid attachment types abort processing and are reported before any row is processed.
 2. If the row count exceeds 10, a confirmation dialog warns the user that the run may take a long time.
 3. All rows (regardless of table filters) are collected as row specs.
 4. All enabled prompts are collected.
 5. An activity dialog opens. A worker is created on a background thread.
-6. For each prompt, the worker iterates over all rows, streaming chunks back to the UI. Each generated row updates the table model and the preview panel if the row is the currently selected one.
-7. The user may cancel at any time via the Cancel button in the activity dialog.
-8. On completion, the dirty flag is set for each row whose output changed.
+6. For each prompt, the worker iterates over all rows. For each row, the effective prompt is built by rendering the template and then appending the prompt's configured attachments in order with provenance/context before the provider call is made.
+   - By default, attachment insertion behavior prefers knowledge-base-file attachments before CSV-column attachments to keep the prompt prefix more stable across rows, but any persisted user reorder is honored exactly.
+7. Provider output streams back to the UI. Each generated row updates the table model and the preview panel if the row is the currently selected one.
+8. The user may cancel at any time via the Cancel button in the activity dialog.
+9. On completion, the dirty flag is set for each row whose output changed.
 
 **Postconditions:** All enabled prompts have generated HTML in their output columns for every row in the CSV.
 
@@ -383,7 +449,7 @@ User clicks the `+` or `-` button in any pane header.
 
 **Trigger:** User clicks the dropdown arrow on the **Process** button and selects **Visible Rows** (or selects **Process > Visible Rows**).
 
-**Preconditions:** At least one prompt is enabled. Rows are loaded. Filters may be active. Template validation, including validation of all referenced knowledge-base files, passes.
+**Preconditions:** At least one prompt is enabled. Rows are loaded. Filters may be active. Template and attachment validation, including validation of all referenced knowledge-base files, pass.
 
 **Flow:**
 
@@ -504,7 +570,7 @@ User clicks the `+` or `-` button in any pane header.
 
 **Actor:** User
 
-**Description:** The user works with the project's on-disk representation, which consists of a `.project.json` manifest, a sibling `.csv` data file, per-prompt `.prompt.txt` sidecar files, and an optional project-scoped knowledge-base directory reference.
+**Description:** The user works with the project's on-disk representation, which consists of a `.project.json` manifest, a sibling `.csv` data file, per-prompt `.prompt.txt` sidecar files, per-prompt attachment metadata stored in the manifest, and an optional project-scoped knowledge-base directory reference.
 
 **Trigger:** Saving or opening a project.
 
@@ -513,15 +579,22 @@ User clicks the `+` or `-` button in any pane header.
 **Flow:**
 
 1. **On save:** Each prompt's text is written to `{output_field_sanitized}.prompt.txt` in the project directory. The project manifest is written to `*.project.json`. The sibling CSV is written to `*.csv`.
+   - Prompt attachment metadata is stored in the manifest as structured prompt metadata separate from prompt text sidecars.
+   - Attachment metadata preserves source type, source identifier, and order.
 2. **Knowledge-base directory persistence:**
    - A project may store a configured knowledge-base directory in its manifest.
    - When possible, the stored knowledge-base directory path is relative to the `.project.json` file location.
    - If a relative representation is not possible, an absolute path may be stored.
    - The knowledge-base directory setting is saved separately from the files inside that directory; saving the project persists the directory reference only.
-3. **On load:** Prompts with `prompt_file` references have their text read from sidecars. The sibling CSV is loaded if present. If a knowledge-base directory is configured, it is resolved relative to the project file when stored as a relative path.
+3. **On load:** Prompts with `prompt_file` references have their text read from sidecars. Prompt attachment metadata is restored from the manifest without modifying prompt text. The sibling CSV is loaded if present. If a knowledge-base directory is configured, it is resolved relative to the project file when stored as a relative path.
 4. Column naming: prompt output fields are sanitized to alphanumeric, dot, underscore, and hyphen characters, replacing all others with underscores.
 
 **Postconditions:** The project's on-disk layout is consistent and reconstructible, including its project-scoped knowledge-base directory setting.
+
+**Invariants:**
+- Prompt text persistence and prompt attachment persistence are separate concerns: prompt text remains in `.prompt.txt` sidecars, while attachment metadata remains in the `.project.json` manifest.
+- Older project files without prompt-attachment metadata remain loadable; the effective attachment list for such prompts is empty.
+- Existing inline `{{column}}` and `{{@path}}` placeholder behavior remains backward compatible and does not require migration into attachment metadata.
 
 ## Use Case 20: Exit the Application
 
@@ -583,11 +656,13 @@ User clicks the `+` or `-` button in any pane header.
 1. The explorer displays folders and files under the configured knowledge-base directory.
 2. The user may navigate through subdirectories within that root.
 3. For any file, the application always offers an external viewer or editor action that opens the selected file with the operating system's default associated application.
-4. The user may copy a file within the knowledge-base root.
-5. The user may rename a file within the knowledge-base root.
-6. The application may also offer file deletion within the knowledge-base root.
-7. If deletion is offered and the user invokes it, the application shows a confirmation dialog identifying the file to be removed before deletion completes.
-8. After a successful copy, rename, or delete action, the explorer refreshes to show the current filesystem state.
+4. For directly editable knowledge-base files, the explorer offers embedded edit actions as defined by Use Cases 26 and 27.
+5. For supported non-editable local files that require conversion (for example PDFs and other formats the application's MarkItDown integration can convert), the explorer offers an internal Markdown view action as defined by Use Case 29.
+6. The user may copy a file within the knowledge-base root.
+7. The user may rename a file within the knowledge-base root.
+8. The application may also offer file deletion within the knowledge-base root.
+9. If deletion is offered and the user invokes it, the application shows a confirmation dialog identifying the file to be removed before deletion completes.
+10. After a successful copy, rename, or delete action, the explorer refreshes to show the current filesystem state.
 
 **Postconditions:** The knowledge-base directory contents reflect any completed copy, rename, or delete action.
 
@@ -648,6 +723,30 @@ User clicks the `+` or `-` button in any pane header.
 **Postconditions:** The selected CSV file is either unchanged (cancel) or saved with the user's grid edits.
 
 **Error conditions:** CSV parsing failures, unsupported encodings, unreadable files, or save failures are reported to the user.
+
+## Use Case 29: View a Convertible Knowledge-Base File as Markdown
+
+**Actor:** User
+
+**Description:** The user opens a supported non-editable knowledge-base file, such as a PDF, in an internal Markdown viewer after local conversion.
+
+**Trigger:** User chooses a view action for a supported convertible knowledge-base file from the knowledge-base explorer.
+
+**Preconditions:** A project-scoped knowledge-base directory is configured, the selected file exists within that directory, the file is inside that root, and the file type is one the application's MarkItDown integration can convert for local viewing.
+
+**Flow:**
+
+1. The application determines whether its MarkItDown integration is available and working.
+2. If a cached converted Markdown artifact already exists for the current source-file content, that cached Markdown is reused.
+3. Otherwise, the application converts the local source file to Markdown and stores the result in a transparent local cache keyed by the current source file content.
+4. The application opens a modal internal Markdown viewer for the converted output.
+5. The viewer is read-only for converted files; it does not allow saving changes back to the source document.
+6. The viewer also provides an action to open the original source file externally.
+7. If the source file later changes on disk, the next internal view request regenerates the converted Markdown instead of reusing the stale cached version.
+
+**Postconditions:** The user can inspect a Markdown rendering of the selected source document inside the application without modifying the original file.
+
+**Error conditions:** Unavailable MarkItDown integration, unsupported file type, unreadable source file, failed conversion, or invalid cache reuse is reported to the user and the internal view is not opened.
 
 ## Use Case 23: Strip Whitespace from HTML Columns on Export
 
@@ -736,6 +835,7 @@ User clicks the `+` or `-` button in any pane header.
 | `ExportDialog` | `dialogs.py` | Target path selection, visibility checkbox, and overwrite confirmation for CSV export |
 | `HtmlEditorDialog` | `dialogs.py` | Manual HTML cell editing with syntax highlighting |
 | Knowledge-base management window and embedded file editors | `main_window.py` / `dialogs.py` | Project-scoped knowledge-base directory selection, browsing, file operations, external open actions, and modal embedded editing for supported files |
+| Knowledge-base conversion service | `kb_conversion.py` (planned) | Resolve directly readable vs convertible KB files, use the app's MarkItDown integration to convert supported local files, manage conversion cache, and provide Markdown content for viewing and prompt use |
 | `WildcardFilterProxyModel` | `filter_proxy.py` | Qt proxy model for case-insensitive fnmatch filtering |
 | `CsvTableModel` | `table_model.py` | Qt table model backing the CSV data grid |
 | `HtmlPreview` | `preview.py` | HTML rendering widget with content statistics |
@@ -749,8 +849,13 @@ User clicks the `+` or `-` button in any pane header.
 - The sibling CSV file (`*.csv`) and the `.project.json` form a single project unit. They are saved and loaded together.
 - Filtering affects the table view display and the scope of "Process Visible Rows". It does not modify or remove data.
 - Prompt templates can reference any CSV column by name via `{{column_name}}` placeholders.
-- Prompt templates can also reference project-scoped knowledge-base files via `{{@relative/path.ext}}`; only `.md`, `.markdown`, and `.csv` files are supported, paths are resolved relative to the configured knowledge-base directory, escaping that directory is forbidden, and included content is inserted verbatim without recursive rendering.
-- The application provides a separate project-scoped knowledge-base management window for setting or clearing the knowledge-base directory, browsing files under that root, performing copy/rename actions within that root, optionally deleting files there with confirmation, opening files externally, and opening supported files in modal embedded editors.
+- Prompt templates can also reference project-scoped knowledge-base files via `{{@relative/path.ext}}`; directly readable text formats (`.md`, `.markdown`, `.txt`, `.csv`) are supported natively, additional local file types may be supported through MarkItDown-backed conversion to Markdown, paths are resolved relative to the configured knowledge-base directory, escaping that directory is forbidden, and included content is inserted without recursive rendering.
+- Prompt attachments are ordered prompt metadata, separate from prompt text, and support exactly two source types: project knowledge-base files and CSV columns.
+- Prompt attachments are managed in a separate attachment-management UI so the main prompt editor remains focused on prompt text authoring.
+- During preview and processing, attachments are appended automatically to the effective prompt after normal template rendering, with source provenance/context preserved in the appended text.
+- Prompt execution may reuse a transparent local Markdown conversion cache keyed by source-file content for convertible knowledge-base files; if the source changes, the application regenerates the converted Markdown before reuse.
+- Validation for prompt execution covers both inline placeholders and prompt attachments; missing columns, missing knowledge-base files, unsupported file types, unreadable files, escaping knowledge-base paths, unavailable or failing MarkItDown integration, and conversion failures block execution.
+- The application provides a separate project-scoped knowledge-base management window for setting or clearing the knowledge-base directory, browsing files under that root, performing copy/rename actions within that root, optionally deleting files there with confirmation, opening files externally, opening supported text/CSV files in modal embedded editors, and opening supported convertible files in a read-only internal Markdown viewer.
 - Embedded knowledge-base editors are modal dialogs with explicit Save and Cancel actions.
 - The reusable embedded markdown-capable editor is used both for prompt editing in the main window and for embedded editing of markdown knowledge-base files.
 - The default CSV delimiter is `;` (semicolon). New projects, fresh installs, and any persisted CSV config missing a delimiter value use this delimiter unless the user changes it in Settings.
@@ -774,9 +879,9 @@ User adds prompt
   → FieldConfig created → Table columns expanded
 
 User previews / processes
-  → Validate CSV placeholders + knowledge-base references (exist, supported type, within KB root)
+  → Validate CSV placeholders + knowledge-base references + prompt attachments
   → Prompt dependency graph built and topologically sorted (or cycle detected)
-  → GenerationService.prepare_prompt() → PromptRenderer.render()
+  → GenerationService.prepare_prompt() → PromptRenderer.render() → append ordered attachment content with provenance
   → ProviderClient.generate() → Streaming chunks
   → GenerationWorker.row_generated → TableModel.set_cell()
   → HtmlPreview.set_html() → Rendered output
