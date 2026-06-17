@@ -256,6 +256,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 6. Knowledge-base references are project-scoped:
    - The knowledge-base directory is configured per project.
    - Supported referenced file types include directly readable text formats (`.md`, `.markdown`, `.txt`, `.csv`) and additional local file types that the application's MarkItDown-backed conversion capability can successfully convert to Markdown for prompt use.
+   - Packaged desktop builds bundle the MarkItDown runtime dependencies required for the application's supported local conversion formats, including PDF conversion.
    - Referenced paths are interpreted relative to the configured knowledge-base directory.
    - Referenced paths must not escape the configured knowledge-base directory.
    - Directly readable text formats are inserted from the source file contents.
