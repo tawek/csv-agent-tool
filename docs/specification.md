@@ -494,7 +494,7 @@ User clicks the `+` or `-` button in any pane header.
    - If the prompt template references multiple CSV columns, the application measures the content length (character count) of each referenced column across all rows in the document, selects the column with the highest total content length, and uses that as the default.
    - If no columns are referenced, the selector defaults to empty and the left preview pane shows nothing.
 2. The user selects fields in the left (source) and right (result) combo boxes.
-3. The description panel renders the HTML of each field using `HtmlPreview`, which falls back to `QTextBrowser` when Qt WebEngine is disabled.
+3. The description panel renders the HTML of each field using `HtmlPreview`, which uses `QTextBrowser` by default (Qt WebEngine is disabled at startup for compatibility with remote X11 and headless environments).
 4. Stats below each preview show section count, paragraph count, word count, and character count.
 5. When a generation is in progress, the right preview updates live as chunks stream in.
 
@@ -547,20 +547,22 @@ User clicks the `+` or `-` button in any pane header.
 
 **Description:** The user manages the current project's knowledge-base directory and browses its files in a dedicated management window.
 
-**Trigger:** User opens the knowledge-base management window from the main application UI.
+**Trigger:** User selects the single **Knowledge Base** entry in the main application UI.
 
 **Preconditions:** A project session is active.
 
 **Flow:**
 
-1. A separate knowledge-base management window opens for the current project.
-2. The window shows the currently configured project-scoped knowledge-base directory, if any.
-3. The user may set or change the knowledge-base directory by browsing for a folder.
-4. The user may clear the configured knowledge-base directory.
-5. The window provides a file and directory explorer rooted at the configured knowledge-base directory.
-6. If no knowledge-base directory is configured, file-browsing and file-management actions that require a root directory are unavailable until the user sets one.
-7. The user may ask the application to open the knowledge-base directory in the operating system's external file explorer.
-8. Changes to the configured knowledge-base directory are applied to the current project and are persisted on the next project save.
+1. The main application UI exposes a single **Knowledge Base** entry for knowledge-base access; separate direct knowledge-base actions are not required in the menu structure.
+2. Selecting that entry opens a separate knowledge-base management window for the current project.
+3. The window shows the currently configured project-scoped knowledge-base directory, if any.
+4. The user may set or change the knowledge-base directory by browsing for a folder.
+5. The user may clear the configured knowledge-base directory.
+6. The window provides a file and directory explorer rooted at the configured knowledge-base directory.
+7. If no knowledge-base directory is configured, file-browsing and file-management actions that require a root directory are unavailable until the user sets one.
+8. The user may ask the application to open the knowledge-base directory in the operating system's external file explorer.
+9. The window provides a **Close** action so the user can exit the knowledge-base manager directly from that screen.
+10. Changes to the configured knowledge-base directory are applied to the current project and are persisted on the next project save.
 
 **Postconditions:** The project has either no knowledge-base directory or one active knowledge-base root that is available for prompt references and browsing.
 

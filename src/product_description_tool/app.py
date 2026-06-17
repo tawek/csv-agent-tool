@@ -1,6 +1,8 @@
 import os
 import sys
 
+os.environ.setdefault("PRODUCT_DESCRIPTION_TOOL_DISABLE_WEBENGINE", "1")
+
 from PySide6.QtWidgets import QApplication
 
 from product_description_tool.config import ConfigStore
