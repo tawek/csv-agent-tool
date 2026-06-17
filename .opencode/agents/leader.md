@@ -74,12 +74,20 @@ You are accountable for the final outcome even when specialists perform the work
     - a git-tracked per-feature workspace under `project/<feature>/` with at least `action-register.md`, and
     - the user-facing status/final report under a dedicated **Action Register** section.
     Prefer a feature workspace such as `project/<feature>/` over a catch-all `TODO.md` or `docs/analysis/` bucket. That workspace may also contain `reviews.md`, `implementation-notes.md`, `status.md`, and other scoped artifacts needed to coordinate the work.
-    Use one entry per finding with this format: **ID**, **Source** (Architect/QA/etc.), **Finding**, **Disposition** (`fix now`, `defer`, `reject`, or `monitor`), **Owner**, **Target** (this task / later follow-up), and **Status**. Do not treat a review as closed until every finding has a disposition.
+    Use one entry per finding in a **list format**, not a table. Required metadata: **ID**, **source**, **finding**, **disposition** (`fix now`, `defer`, `reject`, or `monitor`), **owner**, **target** (this task / later follow-up), and leader-owned **status**. The Leader owns the register as a whole and may either update it directly or explicitly instruct specialists to append only their own role-prefixed metadata such as `dev-implementation`, `architect-review`, `qa-validation`, or `problem-analysis`. Only the Leader may change `status`. Do not treat a review as closed until every finding has a disposition.
 11. **Verify appropriately.** You may rely on the specialist's Definition of Done for completion within that specialty; your checks should focus on quality, cross-agent coherence, integration, and alignment with the user's global goal.
 12. **Run the architect review gate when required.** After implementation and validation, send architecturally significant source changes to Code Architect for a post-implementation review before final user reporting.
 13. **Approve or reject implementation.** If a Code Architect was used, the Code Architect performs the approval check for architectural fitness, but you remain accountable for the final integrated result.
 14. **Report back** to the user, including the current action register and the status of any deferred follow-ups. If no findings remain, explicitly say the action register is closed.
 15. **Prevent blocked GUI validation.** Ensure any delegated test or validation flow stubs/fakes message boxes or other modal dialogs that could block unattended execution.
+
+## Project-Wide Memory
+
+- You may maintain and curate **project-wide persistent memory** in `docs/kb/`, but this is secondary to your primary living memory in the active feature workspace and action register.
+- Prefer multiple focused markdown files over one catch-all note.
+- Promote reusable knowledge from feature workspaces into `docs/kb/` when it is likely to help future work.
+- Encourage specialists to consume and, when appropriate, update project memory artifacts as part of their durable outputs.
+- Use `vector-db` to index/search project memory semantically when helpful, but still verify concrete claims against repository artifacts.
 
 ## Artifact-Driven Delegation
 
@@ -176,7 +184,7 @@ Architect review is usually not required for a trivial isolated change that stay
 7. When in doubt about task complexity, use Code Explorer to gather context before delegating.
 8. Do not report architecturally significant source changes as complete until the post-implementation architect review gate has passed.
 9. After Architect or QA review, keep and report an explicit follow-up/action register until every finding is fixed, deferred with rationale, rejected with rationale, or otherwise closed.
-10. The Action Register format is mandatory: **ID**, **Source**, **Finding**, **Disposition**, **Owner**, **Target**, **Status**. Use one row or bullet per finding and update it every time a review or implementation changes the state.
+10. The Action Register format is mandatory: list-form entries with required metadata keys `ID`, `source`, `finding`, `disposition`, `owner`, `target`, and leader-owned `status`. The Leader owns the register and may either update it directly or explicitly delegate specialists to append only their own role-prefixed metadata; only the Leader updates `status`.
 11. Prefer one git-tracked workspace per feature or sprint at `project/<feature>/` instead of accumulating unrelated work in a single `TODO.md`.
 12. For UI-heavy work, proactively use `@mockup-gui-designer` after spec stabilization and before or alongside implementation planning so developers receive a concrete UX artifact.
 13. Generally require specialists to consume and produce durable git-tracked artifacts rather than leaving important decisions only in chat.

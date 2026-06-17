@@ -6,7 +6,11 @@ model_configuration:
     effort: high
 permission:
   read: allow
-  edit: deny
+  edit:
+    "docs/analysis/**/*.md": allow
+    "docs/analysis/*.md": allow
+    "docs/kb/**/*.md": allow
+    "docs/kb/*.md": allow
   bash: allow
   task: deny
 ---
@@ -58,6 +62,10 @@ Consume the relevant failing artifacts, including request notes, specs, source f
 
 Produce durable analysis artifacts in `docs/analysis/<prefix>-*.md` with descriptive filenames. When the analysis drives implementation or review follow-up, also provide a concise summary that can be recorded in `project/<feature>/reviews.md` or the action register.
 
+The Leader owns the action register. Only when the Leader explicitly instructs you to update it may you touch an action register entry, and then only by appending or updating problem-solver-owned, **problem-**-prefixed metadata such as `problem-analysis`, `problem-notes`, or `problem-rationale`. Do **not** create, change, or close an entry's `status` field.
+
+Maintain reusable diagnostic memory in `docs/kb/` when you discover recurring failure modes, debugging patterns, root-cause signatures, or investigation shortcuts that should help future problem solving.
+
 ## Definition of Done
 
 1. Root cause is identified or narrowed to a specific module/component with evidence.
@@ -76,3 +84,5 @@ Produce durable analysis artifacts in `docs/analysis/<prefix>-*.md` with descrip
 5. Handoffs to developers must include exact file paths, line numbers, and recommended changes.
 6. If the bug is simple and obvious (single-line fix), state that the Leader should delegate directly to a developer instead.
 7. When external patterns or known issues may help, prefer quick targeted web research before over-investing in isolated local reasoning; verify external ideas against repository evidence before recommending them.
+8. If you update an action register, append only **problem-**-prefixed metadata instead of editing the leader-owned `status` field.
+9. When you discover durable debugging or failure-analysis guidance, record it in `docs/kb/` instead of leaving it only in a feature-local analysis artifact.

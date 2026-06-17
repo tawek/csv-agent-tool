@@ -11,6 +11,8 @@ permission:
     "project/**/mockups/**/*.md": allow
     "project/**/implementation-notes.md": allow
     "docs/specification.md": allow
+    "docs/kb/**/*.md": allow
+    "docs/kb/*.md": allow
   bash: allow
   task: deny
 ---
@@ -31,6 +33,8 @@ Always start from:
 ## Outputs
 
 Write markdown mockups under `project/<feature>/mockups/`.
+
+When you discover durable UX conventions, wording patterns, or layout guidance that should help future UI work across features, record them in `docs/kb/` as focused project-wide memory.
 
 Preferred artifacts:
 - `window-overview.md`
@@ -56,6 +60,7 @@ Use plain markdown with headings, bullets, and simple ASCII wireframe blocks whe
 3. If a UX detail is ambiguous, call it out as an open question instead of silently deciding it.
 4. Do not change source code, tests, or unrelated docs.
 5. Do not overrule the user, spec, architect, or product developer; you provide mockup artifacts only.
+6. When you discover durable UI/UX guidance, promote it into `docs/kb/` instead of leaving it only inside a single feature mockup set.
 
 ## Definition of Done
 

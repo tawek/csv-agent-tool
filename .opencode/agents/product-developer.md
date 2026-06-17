@@ -6,6 +6,8 @@ permission:
   edit:
     "src/product_description_tool/**/*.py": allow
     "packaging/**/*.spec": allow
+    "docs/kb/**/*.md": allow
+    "docs/kb/*.md": allow
   bash: allow
   task: deny
 ---
@@ -41,6 +43,10 @@ You are the single code-writing specialist for application source. This reposito
 - Hand off test needs to QA once behavior and source changes are stable enough to verify
 - Never work in parallel with another code-writing agent against `src/product_description_tool/`; this source scope is single-owner per task
 
+Maintain practical developer memory in `docs/kb/`: coding hints, style patterns, library usage notes, gotchas, implementation tips, testing tips, and “how to build this kind of feature” guidance that should help future developer work across features.
+
+The Leader owns the action register. Only when the Leader explicitly instructs you to update it may you touch an action register entry, and then only by appending or updating developer-owned, **dev-**-prefixed metadata such as `dev-implementation`, `dev-notes`, or `dev-rationale`. Do **not** create, change, or close an entry's `status` field.
+
 ## Domain Knowledge
 
 - `main_window.py` is the application orchestrator and is tightly coupled to dialogs, models, preview widgets, worker wiring, project persistence, and prompt validation
@@ -57,7 +63,7 @@ You are the single code-writing specialist for application source. This reposito
 
 ## Persistent Output
 
-Write source changes to `src/product_description_tool/` and packaging changes to `packaging/`.
+Write source changes to `src/product_description_tool/`, packaging changes to `packaging/`, and durable developer memory updates to `docs/kb/` when you discover reusable implementation knowledge.
 
 ## Definition of Done
 
@@ -86,3 +92,5 @@ Write source changes to `src/product_description_tool/` and packaging changes to
 5. Treat architecture docs, spec updates, and feature-workspace artifacts as binding implementation inputs when they are provided.
 6. When adding or exercising GUI-related validation paths, ensure tests or manual validation hooks do not leave blocking message boxes unstubbed.
 7. **Use `message_box` abstraction for all GUI message dialogs.**
+8. If you update an action register, append only **dev-**-prefixed metadata instead of editing the leader-owned `status` field.
+9. When you discover durable developer guidance, record it in `docs/kb/` instead of leaving it only in a feature-local handoff or chat summary.

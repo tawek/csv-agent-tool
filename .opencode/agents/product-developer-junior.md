@@ -6,6 +6,8 @@ permission:
   edit:
     "src/product_description_tool/**/*.py": allow
     "packaging/**/*.spec": allow
+    "docs/kb/**/*.md": allow
+    "docs/kb/*.md": allow
   bash: allow
   task: deny
 ---
@@ -42,6 +44,10 @@ You receive detailed instructions. If the task requires architectural decisions,
 - Consume named workspace/spec/mockup artifacts before coding; do not rely only on conversational summaries when durable artifacts are provided
 - Hand off testing work to QA unless the Leader assigns a serial combined task
 
+Maintain practical developer memory in `docs/kb/`: implementation hints, local style patterns, gotchas, library usage notes, and reusable “how to do this kind of change/test” guidance that can help future developer work.
+
+The Leader owns the action register. Only when the Leader explicitly instructs you to update it may you touch an action register entry, and then only by appending or updating developer-owned, **dev-**-prefixed metadata such as `dev-implementation`, `dev-notes`, or `dev-rationale`. Do **not** create, change, or close an entry's `status` field.
+
 ## Patterns and Conventions
 
 - `@dataclass(slots=True)` for data models
@@ -50,7 +56,7 @@ You receive detailed instructions. If the task requires architectural decisions,
 
 ## Persistent Output
 
-Write source changes to `src/product_description_tool/` and packaging changes to `packaging/`.
+Write source changes to `src/product_description_tool/`, packaging changes to `packaging/`, and durable developer memory updates to `docs/kb/` when you learn something reusable.
 
 ## Definition of Done
 
@@ -77,3 +83,5 @@ Write source changes to `src/product_description_tool/` and packaging changes to
 4. If required input artifacts are missing or contradictory, stop and ask the Leader to resolve them.
 5. Do not rely on GUI paths that may block unattended execution with real message boxes during validation.
 6. **Use `message_box` abstraction for all GUI message dialogs.**
+7. If you update an action register, append only **dev-**-prefixed metadata instead of editing the leader-owned `status` field.
+8. When you discover durable developer guidance, record it in `docs/kb/` instead of leaving it only in a feature-local handoff or chat summary.

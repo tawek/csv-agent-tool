@@ -62,6 +62,23 @@ uv run pyinstaller packaging/product_description_tool.spec
 
 When a feature needs deeper explanation than a short README note, add or extend a focused document under `docs/`.
 
+## Project-Wide Agent Memory
+
+Agents should maintain **project-wide persistent memory**, not just feature-local notes.
+
+- The default shared memory location is `docs/kb/`.
+- Treat `docs/kb/` as a growing collection of **orthogonal markdown files** that capture durable project knowledge: architecture constraints, debugging hints, invariants, workflow gotchas, review patterns, terminology, historical findings, and other reusable context.
+- Agents may create new focused memory files or extend existing ones when doing so improves future work.
+- The broader and more reusable the knowledge, the better; avoid hiding durable project memory only inside a single feature workspace or a single chat transcript.
+- Feature workspaces under `project/<feature>/` remain the right place for feature-scoped execution artifacts, but durable cross-feature knowledge should be promoted into `docs/kb/`.
+- Agents may index this memory with `vector-db` and search it semantically when helpful, but must still verify concrete claims against repository artifacts.
+- Agents should update project-wide memory proactively when they discover durable facts, recurring pitfalls, stable decisions, or reusable implementation/review guidance.
+- Role emphasis:
+  - `@code-explorer` should maintain broad project memory and indexable knowledge about the documentation set and source-code structure so future exploration starts from accumulated knowledge rather than repeated broad searches.
+  - `@code-architect` should maintain high-level software design notes, architecture constraints, and interface-level guidance.
+  - `@product-developer` and `@product-developer-junior` should maintain practical developer memory such as coding hints, style patterns, gotchas, library usage notes, and “how to implement/test this kind of thing” guidance.
+  - The `leader` may also maintain project-wide memory, but the leader's primary living memory remains the active feature workspace and action register.
+
 ## Working Rules
 
 - Prefer `uv run ...` for all local commands.
@@ -99,12 +116,13 @@ Treat specialist work as **artifact in -> artifact out** by default.
 |------|----------|---------|------------------|
 | Request / intent note | `project/<feature>/implementation-notes.md` or `project/<feature>/request.md` | Anchor the user's intent for all specialists | requested behaviors, constraints, non-goals, relevant context |
 | Status tracker | `project/<feature>/status.md` | Track current phase and next steps | current state, active step, blockers, next actions |
-| Action register | `project/<feature>/action-register.md` | Track review findings and dispositions | entries with **ID**, **Source**, **Finding**, **Disposition**, **Owner**, **Target**, **Status** |
+| Action register | `project/<feature>/action-register.md` | Track review findings, dispositions, and specialist updates | list-form entries with required metadata and leader-owned `status` |
 | Review log | `project/<feature>/reviews.md` | Record architect / QA / problem-analysis review outcomes | review date/context, reviewed artifacts, findings summary, decision |
 | Specification artifact | `docs/specification.md` | Define external behavior | Use Case updates, invariants, behavior expectations |
 | Architecture artifact | `docs/architecture/<prefix>-*.md` | Describe design, boundaries, contracts, tradeoffs | problem statement, constraints, decisions, implications, open questions |
 | QA artifact | `docs/qa/<prefix>-*.md` | Capture test strategy, coverage, or validation notes | scope, scenarios, gaps, pass/fail summary |
 | Problem analysis artifact | `docs/analysis/<prefix>-*.md` | Capture bug/root-cause analysis | symptoms, evidence, hypotheses, root cause, recommended fix |
+| Project-wide memory artifact | `docs/kb/**/*.md` | Capture durable cross-feature project knowledge for future agents | focused topic, durable facts, constraints, hints, references |
 | UX mockup artifact | `project/<feature>/mockups/*.md` | Provide developer-facing UI design inputs | layout, controls, actions, states, interaction notes |
 | Source artifact | `src/product_description_tool/**/*.py`, `packaging/**/*.spec` | Product implementation | code changes matching approved spec/design artifacts |
 | Test artifact | `tests/**/*.py` | Executable verification | deterministic tests tied to behavior/spec |
@@ -116,6 +134,7 @@ Treat specialist work as **artifact in -> artifact out** by default.
 - **QA review**: consume spec + source/test artifacts, produce test artifact and/or QA artifact, and record findings in the action register.
 - **Root-cause analysis**: consume failing artifacts/evidence, produce a problem analysis artifact with a concrete handoff.
 - **UX design**: consume request/spec artifacts, produce mockup artifacts under the feature workspace.
+- **Durable project learning**: when work uncovers reusable cross-feature knowledge, update or create a focused memory artifact under `docs/kb/` in addition to any feature-local artifacts.
 
 ### Workflow Steps
 
@@ -166,13 +185,42 @@ When a review produces findings, maintain an **Action Register** with one entry 
 - `status.md` — current state, next steps, and closure summary
 
 **Required entry format:**
-- **ID** — short stable identifier such as `AR-1`, `QA-2`
-- **Source** — Architect, QA, Problem Solver, etc.
-- **Finding** — concise description of the issue or recommendation
-- **Disposition** — exactly one of: `fix now`, `defer`, `reject`, `monitor`
-- **Owner** — who is responsible for the next step
-- **Target** — current task, follow-up task, or later milestone
-- **Status** — `open`, `in_progress`, `closed`
+- The action register uses a **list format, not a table**.
+- One finding per list entry, for example:
+
+  ```md
+  ## Action Register
+
+  - ID: AR-1
+    - source: Architect
+    - finding: concise description of the issue or recommendation
+    - disposition: fix now
+    - owner: Product Developer
+    - target: current task
+    - status: open
+    - dev-implementation: pending
+    - architect-review: follow-up required
+  ```
+
+- Required metadata keys on every entry:
+  - `ID` — short stable identifier such as `AR-1`, `QA-2`
+  - `source` — Architect, QA, Problem Solver, etc.
+  - `finding` — concise description of the issue or recommendation
+  - `disposition` — exactly one of: `fix now`, `defer`, `reject`, `monitor`
+  - `owner` — who is responsible for the next step
+  - `target` — current task, follow-up task, or later milestone
+  - `status` — `open`, `in_progress`, `closed`
+- Additional metadata is encouraged when useful, but it should use a source prefix so provenance is obvious, for example `dev-implementation`, `architect-review`, `qa-validation`, `problem-analysis`, `dev-notes`, `qa-notes`, or `architect-rationale`.
+- The action register is intentionally **multi-dimensional**. Specialist-specific metadata records specialist progress or judgments; `status` is the leader's closure field.
+
+**Ownership rule:**
+- The **Leader owns the action register as a whole**.
+- Only the **Leader** may create, change, or close an entry's `status` field.
+- The Leader may update the register directly or explicitly delegate a specialist to append or update that specialist's own prefixed metadata fields.
+- Specialists must **not** update the action register on their own initiative.
+- When explicitly instructed to update the register, specialists may add or update only their own prefixed metadata fields such as `architect-review`, `qa-validation`, `dev-implementation`, `problem-analysis`, `dev-notes`, or `architect-rationale`.
+- Specialists must **not** change another specialist's metadata field unless explicitly instructed.
+- If a specialist believes an item should be closed or reopened, they must record that in their own metadata and/or review artifact; the Leader decides the `status` update.
 
 **Closure rule:**
 - A review is not closed until every finding has a disposition.
@@ -291,6 +339,7 @@ The `leader` agent has direct authority to define and maintain team coordination
 ### Persistent Outputs
 
 - **Specs and docs**: `docs/` (specification, project model, architecture, QA reports)
+- **Project-wide memory**: `docs/kb/` as the shared long-lived agent memory corpus
 - **Architecture docs**: `docs/architecture/<prefix>-*.md`
 - **QA reports**: `docs/qa/<prefix>-*.md`
 - **Feature workspaces**: `project/<feature>/` containing scoped planning and review artifacts such as `action-register.md`, `reviews.md`, `implementation-notes.md`, and `status.md`
@@ -302,6 +351,8 @@ All specialists should normally operate on named repository artifacts.
 
 - **Leader** delegates by naming input artifacts and required output artifacts.
 - **Specialists** should prefer updating or creating persistent files over returning purely conversational conclusions when the work affects decisions, implementation, review, or handoff.
+- **Action-register ownership rule**: the Leader owns the register. Specialists may append or update specialist-specific metadata within an entry only when explicitly instructed, and only the Leader may edit the entry's `status` field.
+- **Project-memory rule**: agents should maintain durable cross-feature memory in `docs/kb/`, not just feature-local notes, whenever they learn something likely to help future work.
 - **Downstream specialists** should consume the produced artifacts directly rather than relying only on the Leader's paraphrase.
 - **Ephemeral chat-only output** is acceptable for small codebase lookups, but not for contract-setting decisions, implementation plans, review decisions, or bug diagnoses that need to survive the session.
 
@@ -332,10 +383,10 @@ The mockup designer is an input artifact producer for UX clarity; it does not ov
 | Agent | read | edit | bash | task |
 |-------|------|------|------|------|
 | Leader | allow (`AGENTS.md`, `.opencode/agents/`) for direct team-rule and agent-configuration maintenance | allow (`AGENTS.md`, `.opencode/agents/`) for direct team-rule and agent-configuration maintenance | allow | `*`: allow |
-| Problem Solver | allow | deny | allow | deny |
-| Code Architect | allow | allow (`docs/specification.md`, `docs/architecture/`) | allow | deny |
-| Product Developer | allow | allow (`src/product_description_tool/`, `packaging/`) | allow | deny |
-| Mockup GUI Designer | allow | allow (`project/**/mockups/**/*.md`, `project/**/mockups/*.md`, `project/**/implementation-notes.md`, `docs/specification.md`) | allow | deny |
-| Product Developer (Junior) | allow | allow (`src/product_description_tool/`, `packaging/`) | allow | deny |
-| QA Engineer | allow | allow (tests/) | allow | deny |
-| Code Explorer | allow | deny | allow | deny |
+| Problem Solver | allow | allow (`docs/analysis/`, `docs/kb/`) | allow | deny |
+| Code Architect | allow | allow (`docs/specification.md`, `docs/architecture/`, `docs/kb/`) | allow | deny |
+| Product Developer | allow | allow (`src/product_description_tool/`, `packaging/`, `docs/kb/`) | allow | deny |
+| Mockup GUI Designer | allow | allow (`project/**/mockups/**/*.md`, `project/**/mockups/*.md`, `project/**/implementation-notes.md`, `docs/specification.md`, `docs/kb/`) | allow | deny |
+| Product Developer (Junior) | allow | allow (`src/product_description_tool/`, `packaging/`, `docs/kb/`) | allow | deny |
+| QA Engineer | allow | allow (tests/, `docs/kb/`) | allow | deny |
+| Code Explorer | allow | allow (`docs/kb/`) | allow | deny |

@@ -9,6 +9,8 @@ permission:
   edit:
     "docs/specification.md": allow
     "docs/architecture/**/*.md": allow
+    "docs/kb/**/*.md": allow
+    "docs/kb/*.md": allow
   bash: allow
   task: deny
 ---
@@ -62,7 +64,16 @@ Produce durable design artifacts, not just chat advice:
 
 - design documents in `docs/architecture/<prefix>-*.md`
 - spec updates in `docs/specification.md` when delegated
+- project-wide memory updates in `docs/kb/` when you discover durable architectural knowledge
 - review summaries in `project/<feature>/reviews.md` when delegated a post-implementation review
+
+The Leader owns the action register. Only when the Leader explicitly instructs you to update it may you touch an action register entry, and then only by appending or updating architect-owned, **architect-**-prefixed metadata such as `architect-review`, `architect-rationale`, or `architect-notes`. Do **not** create, change, or close an entry's `status` field.
+
+## Project-Wide Memory
+
+- Maintain reusable project knowledge in `docs/kb/` as a set of focused markdown files.
+- Keep high-level software design notes there, including architecture constraints, interface contracts, tradeoffs, invariants, and review guidance that should outlive a single feature.
+- You may use `vector-db` to search project memory semantically when helpful, but verify concrete claims against current repository artifacts.
 
 ## Architect Review Gate
 
@@ -97,3 +108,5 @@ When delegated a post-implementation architect review, inspect the implemented c
 7. Respect the spec-first workflow: structural changes that affect behavior require spec updates first.
 8. For architecturally significant source changes, perform the post-implementation review before the Leader gives the final user report.
 9. Prefer artifact updates over chat-only recommendations for any decision that should guide downstream work.
+10. If you update an action register, append only **architect-**-prefixed metadata instead of editing the leader-owned `status` field.
+11. When you learn something architecturally durable, update `docs/kb/` instead of leaving that knowledge only in a feature workspace or chat summary.

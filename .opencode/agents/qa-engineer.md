@@ -5,6 +5,8 @@ permission:
   read: allow
   edit:
     "tests/**/*.py": allow
+    "docs/kb/**/*.md": allow
+    "docs/kb/*.md": allow
   bash: allow
   task: deny
 ---
@@ -57,7 +59,7 @@ You design and maintain the test strategy for this PySide6 desktop application. 
 
 ## Persistent Output
 
-Write tests to `tests/`. Write test plans and coverage reports to `docs/qa/<prefix>-*.md`.
+Write tests to `tests/`. Write test plans and coverage reports to `docs/qa/<prefix>-*.md`. Write durable QA/testing memory to `docs/kb/` when you discover reusable testing guidance, pitfalls, or coverage heuristics.
 
 ## Artifact Contract
 
@@ -68,6 +70,8 @@ Produce one or more durable outputs as appropriate:
 - executable tests in `tests/`
 - QA plans / validation notes / coverage reports in `docs/qa/<prefix>-*.md`
 - review summary entries in `project/<feature>/reviews.md` when delegated a review pass
+
+The Leader owns the action register. Only when the Leader explicitly instructs you to update it may you touch an action register entry, and then only by appending or updating QA-owned, **qa-**-prefixed metadata such as `qa-validation`, `qa-notes`, or `qa-rationale`. Do **not** create, change, or close an entry's `status` field.
 
 ## Definition of Done
 
@@ -99,4 +103,6 @@ Produce one or more durable outputs as appropriate:
 7. When testing GUI behavior, use FakeDialog and qtbot.waitUntil() patterns from existing tests.
 8. **Use the `message_box` wrapper for all test message-box configuration. Never monkeypatch `QMessageBox` directly.**
 9. Prefer explicit command timeouts of 30 seconds or less when running tests during agent work.
-8. Tie scenarios and findings back to named artifacts so downstream reviewers can trace why the tests exist.
+10. Tie scenarios and findings back to named artifacts so downstream reviewers can trace why the tests exist.
+11. If you update an action register, append only **qa-**-prefixed metadata instead of editing the leader-owned `status` field.
+12. When you discover durable testing guidance or recurring pitfalls, record them in `docs/kb/` instead of leaving them only in a feature-local QA report.
