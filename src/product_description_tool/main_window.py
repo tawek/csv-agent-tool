@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from product_description_tool.collapsible_panel import CollapsiblePanel
+from product_description_tool.collapsible_panel import CollapsiblePanel, PanelState
 from product_description_tool.config import AppConfig, ConfigStore, CsvConfig, FieldConfig
 from product_description_tool.csv_repository import CsvDocument, CsvRepository
 from product_description_tool.dialogs import (
@@ -1312,58 +1312,70 @@ class MainWindow(QMainWindow):
         header.setStretchLastSection(False)
 
     def _connect_panel_buttons(self) -> None:
+        """Wire '+' and '-' buttons for all three panels."""
         panels = [self.csv_panel, self.prompt_panel, self.description_panel]
         for panel in panels:
-            panel.minimize_button.clicked.connect(
-                lambda checked, p=panel: self._on_panel_minimize(p)
-            )
             panel.maximize_button.clicked.connect(
-                lambda checked, p=panel: self._on_panel_maximize(p, panels)
+                lambda checked, p=panel: self._on_panel_grow(p)
             )
-        self._update_panel_icons(panels)
-
-    def _update_panel_icons(self, panels: list[CollapsiblePanel]) -> None:
-        for panel in panels:
-            next_minimize_action = "=" if panel.collapsed else "-"
-            next_maximize_action = self._next_maximize_action(panel, panels)
-            panel.set_minimize_icon(next_minimize_action)
-            panel.set_minimize_tooltip(
-                "Normalize" if next_minimize_action == "=" else "Minimize"
-            )
-            panel.set_maximize_icon(next_maximize_action)
-            panel.set_maximize_tooltip(
-                "Maximize" if next_maximize_action == "+" else "Normalize"
+            panel.minimize_button.clicked.connect(
+                lambda checked, p=panel: self._on_panel_shrink(p)
             )
 
-    def _next_maximize_action(self, panel: CollapsiblePanel, panels: list[CollapsiblePanel]) -> str:
-        if panel.is_maximized(panels):
-            return "="
-        return "+"
+    def _on_panel_grow(self, panel: CollapsiblePanel) -> None:
+        """Handle '+' click: grow the panel and coordinate cross-panel state.
 
-    def _on_panel_minimize(self, panel: CollapsiblePanel) -> None:
-        panels = [self.csv_panel, self.prompt_panel, self.description_panel]
-        panel.set_expanded(not panel.expanded)
+        When a panel transitions to maximized, every other panel that is
+        currently normal becomes temporary minimized. Already-minimized
+        panels are unaffected.
+
+        When a panel that is temporary minimized grows, any sibling that is
+        currently maximized is returned to normal, and all temporary-minimized
+        siblings are also restored to normal.  This keeps the layout coherent:
+        a maximized pane occupies the whole content area, so a different pane
+        becoming visible must first un-maximise the existing one.
+        """
+        was_maximized = panel.state == PanelState.MAXIMIZED
+        was_temp_minimized = panel.state == PanelState.TEMPORARY_MINIMIZED
+        panel.grow()
+        now_maximized = panel.state == PanelState.MAXIMIZED
+
+        if now_maximized and not was_maximized:
+            # Panel just became maximized → temp-minimize all other normal panels
+            for p in (self.csv_panel, self.prompt_panel, self.description_panel):
+                if p is not panel and p.state == PanelState.NORMAL:
+                    p.set_state(PanelState.TEMPORARY_MINIMIZED)
+
+        if was_temp_minimized:
+            # Panel grew out of temporary minimised state → restore all
+            # siblings that are maximised or temporary minimised to normal.
+            for p in (self.csv_panel, self.prompt_panel, self.description_panel):
+                if p is not panel:
+                    if p.state == PanelState.MAXIMIZED:
+                        p.set_state(PanelState.NORMAL)
+                    elif p.state == PanelState.TEMPORARY_MINIMIZED:
+                        p.set_state(PanelState.NORMAL)
+
         self._rebalance_panel_sizes()
-        self._update_panel_icons(panels)
 
-    def _on_panel_maximize(self, panel: CollapsiblePanel, panels: list[CollapsiblePanel]) -> None:
-        if panel.is_maximized(panels):
-            for p in panels:
-                p.set_expanded(True)
-        elif panel.collapsed:
-            for p in panels:
-                if p is panel:
-                    p.set_expanded(True)
-                else:
-                    p.set_expanded(False)
-        else:
-            for p in panels:
-                if p is panel:
-                    p.set_expanded(True)
-                else:
-                    p.set_expanded(False)
+    def _on_panel_shrink(self, panel: CollapsiblePanel) -> None:
+        """Handle '-' click: shrink the panel and coordinate cross-panel state.
+
+        When a maximized panel returns to normal, all panels that were
+        temporary minimized because of that maximized state are restored
+        to normal.
+        """
+        was_maximized = panel.state == PanelState.MAXIMIZED
+        panel.shrink()
+        now_normal = panel.state == PanelState.NORMAL
+
+        if was_maximized and now_normal:
+            # Panel left maximized state → restore all temp-minimized panels
+            for p in (self.csv_panel, self.prompt_panel, self.description_panel):
+                if p is not panel and p.state == PanelState.TEMPORARY_MINIMIZED:
+                    p.set_state(PanelState.NORMAL)
+
         self._rebalance_panel_sizes()
-        self._update_panel_icons(panels)
 
     def _rebalance_panel_sizes(self, *_args) -> None:
         panels = [self.csv_panel, self.prompt_panel, self.description_panel]

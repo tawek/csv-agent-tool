@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QGroupBox, QMessageBox
 
 from product_description_tool.config import AppConfig, ConfigStore, FieldConfig
 from product_description_tool.generation import PromptPayload, USER_PROMPT
+from product_description_tool.collapsible_panel import PanelState
 from product_description_tool.main_window import MainWindow
 from product_description_tool.project import ProjectPrompt
 from product_description_tool.providers import GenerationCancelled
@@ -742,218 +743,293 @@ def test_process_all_aborts_on_cyclic_prompt_dependencies(qtbot, tmp_path: Path,
     assert window._activity_dialog is None
 
 
-def test_pane_maximize_prompts_hides_other_panes(qtbot, tmp_path: Path) -> None:
+# ── Panel grow/shrink state tests (Use Case 25) ──────────────────────────
+
+
+def test_panel_plus_button_fixed_text_and_tooltip(qtbot, tmp_path: Path) -> None:
+    """'+' always shows '+' text and 'Grow pane' tooltip across all states."""
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-
     qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
 
-    assert window.csv_panel.expanded
-    assert window.prompt_panel.expanded
-    assert window.description_panel.expanded
-    assert not window.prompt_panel.is_maximized(
-        [window.csv_panel, window.prompt_panel, window.description_panel]
-    )
-
-    window.prompt_panel.maximize_button.clicked.emit()
-
-    assert window.prompt_panel.is_maximized(
-        [window.csv_panel, window.prompt_panel, window.description_panel]
-    )
-    assert not window.csv_panel.expanded
-    assert window.prompt_panel.expanded
-    assert not window.description_panel.expanded
+    panel = window.csv_panel
+    for state in PanelState:
+        panel.set_state(state)
+        assert panel.maximize_button.text() == "+", f"failed at state {state}"
+        assert panel.maximize_button.toolTip() == "Grow pane", f"failed at state {state}"
 
 
-def test_pane_maximize_normalize_from_maximized(qtbot, tmp_path: Path) -> None:
+def test_panel_minus_button_fixed_text_and_tooltip(qtbot, tmp_path: Path) -> None:
+    """'-' always shows '-' text and 'Shrink pane' tooltip across all states."""
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-
     qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
 
-    window.prompt_panel.maximize_button.click()
-    assert window.prompt_panel.is_maximized(
-        [window.csv_panel, window.prompt_panel, window.description_panel]
-    )
-
-    window.prompt_panel.maximize_button.click()
-
-    assert window.prompt_panel.is_normalized(
-        [window.csv_panel, window.prompt_panel, window.description_panel]
-    )
-    assert window.csv_panel.expanded
-    assert window.prompt_panel.expanded
-    assert window.description_panel.expanded
+    panel = window.csv_panel
+    for state in PanelState:
+        panel.set_state(state)
+        assert panel.minimize_button.text() == "-", f"failed at state {state}"
+        assert panel.minimize_button.toolTip() == "Shrink pane", f"failed at state {state}"
 
 
-def test_pane_maximize_switch_panels(qtbot, tmp_path: Path) -> None:
+def test_panel_plus_button_enabled_states(qtbot, tmp_path: Path) -> None:
+    """'+' enabled for NORMAL/MINIMIZED/TEMPORARY_MINIMIZED; disabled for MAXIMIZED."""
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-
     qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
 
-    window.prompt_panel.maximize_button.click()
-    assert window.prompt_panel.is_maximized(
-        [window.csv_panel, window.prompt_panel, window.description_panel]
-    )
-    assert not window.csv_panel.expanded
+    panel = window.csv_panel
 
-    window.csv_panel.maximize_button.click()
-    assert window.csv_panel.is_maximized(
-        [window.csv_panel, window.prompt_panel, window.description_panel]
-    )
-    assert window.csv_panel.expanded
-    assert not window.prompt_panel.expanded
-    assert not window.description_panel.expanded
+    panel.set_state(PanelState.NORMAL)
+    assert panel.maximize_button.isEnabled()
+
+    panel.set_state(PanelState.MINIMIZED)
+    assert panel.maximize_button.isEnabled()
+
+    panel.set_state(PanelState.TEMPORARY_MINIMIZED)
+    assert panel.maximize_button.isEnabled()
+
+    panel.set_state(PanelState.MAXIMIZED)
+    assert not panel.maximize_button.isEnabled()
 
 
-def test_pane_maximize_all_buttons_update(qtbot, tmp_path: Path) -> None:
+def test_panel_minus_button_enabled_states(qtbot, tmp_path: Path) -> None:
+    """'-' enabled for MAXIMIZED/NORMAL; disabled for MINIMIZED/TEMPORARY_MINIMIZED."""
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-
     qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
 
-    window.prompt_panel.maximize_button.click()
+    panel = window.csv_panel
 
-    assert "Normalize" in window.prompt_panel.maximize_button.toolTip()
-    assert "Maximize" in window.csv_panel.maximize_button.toolTip()
-    assert "Maximize" in window.description_panel.maximize_button.toolTip()
+    panel.set_state(PanelState.MAXIMIZED)
+    assert panel.minimize_button.isEnabled()
+
+    panel.set_state(PanelState.NORMAL)
+    assert panel.minimize_button.isEnabled()
+
+    panel.set_state(PanelState.MINIMIZED)
+    assert not panel.minimize_button.isEnabled()
+
+    panel.set_state(PanelState.TEMPORARY_MINIMIZED)
+    assert not panel.minimize_button.isEnabled()
 
 
-def test_pane_minimize_button_collapses_panel(qtbot, tmp_path: Path) -> None:
+def test_panel_grow_local_transitions(qtbot, tmp_path: Path) -> None:
+    """panel.grow() transitions: MINIMIZED→NORMAL, TEMP_MIN→NORMAL, NORMAL→MAXIMIZED, MAXIMIZED→no-op."""
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-
     qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
 
-    panels = [window.csv_panel, window.prompt_panel, window.description_panel]
-    assert window.csv_panel.expanded
-    assert not window.csv_panel.collapsed
+    panel = window.csv_panel
 
-    window.csv_panel.minimize_button.click()
-    assert not window.csv_panel.expanded
+    # MINIMIZED → NORMAL
+    panel.set_state(PanelState.MINIMIZED)
+    panel.grow()
+    assert panel.state == PanelState.NORMAL
+    assert panel.expanded
+
+    # NORMAL → MAXIMIZED
+    panel.grow()
+    assert panel.state == PanelState.MAXIMIZED
+    assert panel.expanded
+
+    # MAXIMIZED → no-op (grow does nothing when already maximized)
+    panel.grow()
+    assert panel.state == PanelState.MAXIMIZED
+
+    # TEMPORARY_MINIMIZED → NORMAL
+    panel.set_state(PanelState.TEMPORARY_MINIMIZED)
+    panel.grow()
+    assert panel.state == PanelState.NORMAL
+    assert panel.expanded
+
+
+def test_panel_shrink_local_transitions(qtbot, tmp_path: Path) -> None:
+    """panel.shrink() transitions: MAXIMIZED→NORMAL, NORMAL→MINIMIZED, others no-op."""
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    panel = window.csv_panel
+
+    # NORMAL → MINIMIZED
+    panel.set_state(PanelState.NORMAL)
+    panel.shrink()
+    assert panel.state == PanelState.MINIMIZED
+    assert panel.collapsed
+
+    # MINIMIZED → no-op (shrink does nothing)
+    panel.shrink()
+    assert panel.state == PanelState.MINIMIZED
+
+    # TEMPORARY_MINIMIZED → no-op
+    panel.set_state(PanelState.TEMPORARY_MINIMIZED)
+    panel.shrink()
+    assert panel.state == PanelState.TEMPORARY_MINIMIZED
+
+    # MAXIMIZED → NORMAL
+    panel.set_state(PanelState.MAXIMIZED)
+    panel.shrink()
+    assert panel.state == PanelState.NORMAL
+    assert panel.expanded
+
+
+def test_panel_maximize_temp_minimizes_other_normal_panels(qtbot, tmp_path: Path) -> None:
+    """_on_panel_grow on NORMAL → MAXIMIZED; other NORMAL panels become TEMPORARY_MINIMIZED."""
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    assert window.csv_panel.state == PanelState.NORMAL
+    assert window.prompt_panel.state == PanelState.NORMAL
+    assert window.description_panel.state == PanelState.NORMAL
+
+    window._on_panel_grow(window.prompt_panel)
+
+    assert window.prompt_panel.state == PanelState.MAXIMIZED
+    assert window.csv_panel.state == PanelState.TEMPORARY_MINIMIZED
+    assert window.description_panel.state == PanelState.TEMPORARY_MINIMIZED
     assert window.csv_panel.collapsed
+    assert window.description_panel.collapsed
 
 
-def test_pane_minimize_button_icon(qtbot, tmp_path: Path) -> None:
+def test_panel_demaximize_restores_temp_minimized_panels(qtbot, tmp_path: Path) -> None:
+    """_on_panel_shrink on MAXIMIZED → NORMAL; TEMPORARY_MINIMIZED panels restore to NORMAL."""
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-
     qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
 
-    assert window.csv_panel.minimize_button.text() == "-"
-    assert "Minimize" in window.csv_panel.minimize_button.toolTip()
+    # Maximize, then demaximize
+    window._on_panel_grow(window.prompt_panel)
+    assert window.csv_panel.state == PanelState.TEMPORARY_MINIMIZED
 
-    window.csv_panel.minimize_button.click()
-    assert window.csv_panel.minimize_button.text() == "="
-    assert "Normalize" in window.csv_panel.minimize_button.toolTip()
+    window._on_panel_shrink(window.prompt_panel)
+
+    assert window.prompt_panel.state == PanelState.NORMAL
+    assert window.csv_panel.state == PanelState.NORMAL
+    assert window.description_panel.state == PanelState.NORMAL
 
 
-def test_pane_maximize_button_icon_from_normalized(qtbot, tmp_path: Path) -> None:
+def test_panel_already_minimized_unaffected_by_other_maximize(qtbot, tmp_path: Path) -> None:
+    """Already MINIMIZED panels stay MINIMIZED when another panel is maximized."""
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-
     qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
 
-    assert window.csv_panel.maximize_button.text() == "+"
-    assert "Maximize" in window.csv_panel.maximize_button.toolTip()
+    # Minimize CSV panel manually
+    window._on_panel_shrink(window.csv_panel)
+    assert window.csv_panel.state == PanelState.MINIMIZED
+
+    # Maximize prompt panel – only NORMAL panels become TEMPORARY_MINIMIZED
+    window._on_panel_grow(window.prompt_panel)
+
+    assert window.csv_panel.state == PanelState.MINIMIZED  # unchanged
+    assert window.prompt_panel.state == PanelState.MAXIMIZED
+    assert window.description_panel.state == PanelState.TEMPORARY_MINIMIZED
 
 
-def test_pane_maximize_button_icon_from_maximized(qtbot, tmp_path: Path) -> None:
+def test_panel_temp_minimized_looks_like_minimized(qtbot, tmp_path: Path) -> None:
+    """TEMPORARY_MINIMIZED: body hidden, '-' disabled, '+' enabled."""
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-
     qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
 
-    window.csv_panel.maximize_button.click()
-    assert window.csv_panel.is_maximized(
-        [window.csv_panel, window.prompt_panel, window.description_panel]
+    panel = window.csv_panel
+
+    panel.set_state(PanelState.TEMPORARY_MINIMIZED)
+
+    assert panel.collapsed
+    assert not panel.body_frame.isVisible()
+    assert not panel.minimize_button.isEnabled()
+    assert panel.maximize_button.isEnabled()
+
+
+def test_panel_switch_maximized_via_shrink_then_grow(qtbot, tmp_path: Path) -> None:
+    """Switching maximized panels: shrink current, grow desired one."""
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
+
+    # Maximize prompts panel
+    window._on_panel_grow(window.prompt_panel)
+    assert window.prompt_panel.state == PanelState.MAXIMIZED
+    assert window.csv_panel.state == PanelState.TEMPORARY_MINIMIZED
+    assert window.description_panel.state == PanelState.TEMPORARY_MINIMIZED
+
+    # Demaximize prompts panel
+    window._on_panel_shrink(window.prompt_panel)
+    assert all(
+        p.state == PanelState.NORMAL
+        for p in (window.csv_panel, window.prompt_panel, window.description_panel)
     )
-    assert window.csv_panel.maximize_button.text() == "="
-    assert "Normalize" in window.csv_panel.maximize_button.toolTip()
+
+    # Maximize CSV panel instead
+    window._on_panel_grow(window.csv_panel)
+    assert window.csv_panel.state == PanelState.MAXIMIZED
+    assert window.prompt_panel.state == PanelState.TEMPORARY_MINIMIZED
+    assert window.description_panel.state == PanelState.TEMPORARY_MINIMIZED
 
 
-def test_pane_maximize_from_normalized_to_maximized(qtbot, tmp_path: Path) -> None:
+def test_panel_grow_temp_minimized_restores_maximized_and_other_temp_min(
+    qtbot, tmp_path: Path,
+) -> None:
+    """Grow (+) on a TEMPORARY_MINIMIZED panel restores MAXIMIZED→NORMAL and
+    all TEMPORARY_MINIMIZED→NORMAL, leaving no panel maximized.
+
+    Edge case: when one panel is MAXIMIZED and another is TEMPORARY_MINIMIZED,
+    clicking '+' on the TEMPORARY_MINIMIZED panel (not the MAXIMIZED one)
+    should:
+    - Demaximize the MAXIMIZED sibling to NORMAL
+    - Restore all TEMPORARY_MINIMIZED panels to NORMAL
+    - Leave no panel in MAXIMIZED state
+    """
     window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
     qtbot.addWidget(window)
     window.show()
-
     qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
 
-    panels = [window.csv_panel, window.prompt_panel, window.description_panel]
-    assert window.csv_panel.is_normalized(panels)
-    assert not window.csv_panel.is_maximized(panels)
-    assert not window.csv_panel.is_minimized(panels)
+    # Start: all NORMAL
+    assert all(
+        p.state == PanelState.NORMAL
+        for p in (window.csv_panel, window.prompt_panel, window.description_panel)
+    )
 
-    window.csv_panel.maximize_button.click()
+    # Grow prompt → MAXIMIZED; csv + description → TEMPORARY_MINIMIZED
+    window._on_panel_grow(window.prompt_panel)
+    assert window.prompt_panel.state == PanelState.MAXIMIZED
+    assert window.csv_panel.state == PanelState.TEMPORARY_MINIMIZED
+    assert window.description_panel.state == PanelState.TEMPORARY_MINIMIZED
 
-    assert window.csv_panel.is_maximized(panels)
-    assert not window.prompt_panel.expanded
-    assert not window.description_panel.expanded
+    # Grow the TEMPORARY_MINIMIZED csv panel directly (no intermediate shrink)
+    window._on_panel_grow(window.csv_panel)
 
-
-def test_pane_maximize_from_maximized_to_normalized(qtbot, tmp_path: Path) -> None:
-    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
-    qtbot.addWidget(window)
-    window.show()
-
-    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
-
-    panels = [window.csv_panel, window.prompt_panel, window.description_panel]
-    window.csv_panel.maximize_button.click()
-    assert window.csv_panel.is_maximized(panels)
-
-    window.csv_panel.maximize_button.click()
-    assert window.csv_panel.is_normalized(panels)
+    # csv_panel grew out of TEMP_MIN → NORMAL
+    assert window.csv_panel.state == PanelState.NORMAL
     assert window.csv_panel.expanded
+
+    # prompt_panel was MAXIMIZED → restored to NORMAL
+    assert window.prompt_panel.state == PanelState.NORMAL
     assert window.prompt_panel.expanded
+
+    # description_panel was TEMPORARY_MINIMIZED → restored to NORMAL
+    assert window.description_panel.state == PanelState.NORMAL
     assert window.description_panel.expanded
 
-
-def test_pane_maximize_from_collapsed_to_maximized(qtbot, tmp_path: Path) -> None:
-    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
-    qtbot.addWidget(window)
-    window.show()
-
-    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
-
-    panels = [window.csv_panel, window.prompt_panel, window.description_panel]
-    window.csv_panel.minimize_button.click()
-    assert window.csv_panel.collapsed
-
-    window.csv_panel.maximize_button.click()
-    assert window.csv_panel.is_maximized(panels)
-    assert window.csv_panel.expanded
-    assert not window.prompt_panel.expanded
-    assert not window.description_panel.expanded
-
-
-def test_pane_switch_maximized_panel(qtbot, tmp_path: Path) -> None:
-    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
-    qtbot.addWidget(window)
-    window.show()
-
-    qtbot.waitUntil(lambda: window.sections_splitter.size().height() > 0)
-
-    panels = [window.csv_panel, window.prompt_panel, window.description_panel]
-
-    window.csv_panel.maximize_button.click()
-    assert window.csv_panel.is_maximized(panels)
-    assert not window.prompt_panel.expanded
-    assert not window.description_panel.expanded
-
-    window.prompt_panel.maximize_button.click()
-    assert window.prompt_panel.is_maximized(panels)
-    assert not window.csv_panel.expanded
-    assert not window.description_panel.expanded
+    # No panel remains maximized
+    assert not any(p.state == PanelState.MAXIMIZED for p in (
+        window.csv_panel, window.prompt_panel, window.description_panel,
+    ))
 
 
 class TestKnowledgeBaseDirectoryUI:
