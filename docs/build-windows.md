@@ -165,7 +165,7 @@ Verify completion:
 
 ```bash
 rclone size GoogleDrive:WFirma/product-description-tool/
-# Should report ~170-200 objects, ~240-250 MiB
+# Should report ~1000 objects, ~240-250 MiB
 ```
 
 ---
@@ -210,7 +210,7 @@ rclone copy "$BUILD_DIR/product-description-tool/" GoogleDrive:WFirma/product-de
 
 # 9. Verify size
 rclone size GoogleDrive:WFirma/product-description-tool/
-# Should report ~170-200 objects, ~240-250 MiB
+# Should report ~1000 objects, ~240-250 MiB
 
 # 10. Clean up temp directory (only on success — leave on failure for post-mortem)
 rclone size GoogleDrive:WFirma/product-description-tool/ >/dev/null 2>&1 && rm -rf "$BUILD_DIR"
