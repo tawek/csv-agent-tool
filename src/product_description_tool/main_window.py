@@ -173,7 +173,12 @@ class MainWindow(QMainWindow):
         prompt_layout.addLayout(prompt_header)
 
         self.prompt_edit = MarkdownEditor()
-        self.prompt_edit.setPlaceholderText("Use placeholders like {{product_name}}")
+        self.prompt_edit.setPlaceholderText(
+            "Write your prompt here. Use `{{...}}` to embed referenced text verbatim — "
+            "`{{column_name}}` for CSV fields, "
+            "`{{@file.md}}` for knowledge-base files, "
+            "`{{output_field}}` for other prompt outputs."
+        )
         self.prompt_edit.textChanged.connect(self._on_prompt_text_changed)
         prompt_layout.addWidget(self.prompt_edit)
 
