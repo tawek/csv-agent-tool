@@ -32,10 +32,10 @@ def test_project_repository_round_trips_prompts_and_csv_config(tmp_path: Path) -
 
     assert loaded.prompts[0].output_field == "summary"
     assert loaded.prompts[0].prompt == "Summarize {{sku}}"
-    assert loaded.prompts[0].prompt_file == "summary.prompt.txt"
+    assert loaded.prompts[0].prompt_file == "summary.prompt.md"
     assert loaded.prompts[1].enabled is False
     assert loaded.csv.delimiter == ";"
-    assert (tmp_path / "summary.prompt.txt").read_text(encoding="utf-8") == "Summarize {{sku}}"
+    assert (tmp_path / "summary.prompt.md").read_text(encoding="utf-8") == "Summarize {{sku}}"
 
 
 class TestKnowledgeBaseDir:
