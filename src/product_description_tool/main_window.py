@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QStyle,
     QPushButton,
-    QPlainTextEdit,
     QSplitter,
     QStatusBar,
     QTableView,
@@ -37,6 +36,8 @@ from product_description_tool.dialogs import (
 )
 from product_description_tool.filter_proxy import WildcardFilterProxyModel
 from product_description_tool.generation import GenerationService
+from product_description_tool.kb_editor import MarkdownEditor, open_external
+from product_description_tool.kb_window import KnowledgeBaseManager
 from product_description_tool.preview import HtmlPreview, analyze_html_content, format_html_stats
 from product_description_tool.project import Project, ProjectPrompt, ProjectRepository
 from product_description_tool.prompt_renderer import (
@@ -80,6 +81,7 @@ class MainWindow(QMainWindow):
         self._project_modified = False
         self.filter_patterns: dict[str, str] = {}
         self._updating_prompt_ui = False
+        self._kb_manager: KnowledgeBaseManager | None = None
 
         self.table_model = CsvTableModel()
         self.proxy_model = WildcardFilterProxyModel()
@@ -170,7 +172,7 @@ class MainWindow(QMainWindow):
 
         prompt_layout.addLayout(prompt_header)
 
-        self.prompt_edit = QPlainTextEdit()
+        self.prompt_edit = MarkdownEditor()
         self.prompt_edit.setPlaceholderText("Use placeholders like {{product_name}}")
         self.prompt_edit.textChanged.connect(self._on_prompt_text_changed)
         prompt_layout.addWidget(self.prompt_edit)
@@ -306,11 +308,19 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
 
         kb_menu = edit_menu.addMenu("Knowledge Base")
+        self.manage_kb_action = QAction("Knowledge Base Manager...", self)
+        self.manage_kb_action.triggered.connect(self._open_kb_manager)
+        kb_menu.addAction(self.manage_kb_action)
+        kb_menu.addSeparator()
         self.set_kb_directory_action = QAction("Set Directory...", self)
         self.set_kb_directory_action.triggered.connect(self._set_kb_directory)
         self.clear_kb_directory_action = QAction("Clear Directory", self)
         self.clear_kb_directory_action.triggered.connect(self._clear_kb_directory)
         kb_menu.addActions([self.set_kb_directory_action, self.clear_kb_directory_action])
+        kb_menu.addSeparator()
+        self.open_kb_explorer_action = QAction("Open Directory in File Explorer", self)
+        self.open_kb_explorer_action.triggered.connect(self._open_kb_directory_externally)
+        kb_menu.addAction(self.open_kb_explorer_action)
 
         process_menu = menu_bar.addMenu("Process")
         self.process_all_action = QAction("All CSV Rows", self)
@@ -331,6 +341,7 @@ class MainWindow(QMainWindow):
     def new_project(self) -> None:
         if not self._maybe_save_project():
             return
+        self._close_kb_manager()
         self.project = self._default_project()
         self.document = CsvDocument(headers=[], rows=[])
         self.project_path = None
@@ -348,6 +359,7 @@ class MainWindow(QMainWindow):
     def open_project(self) -> None:
         if not self._maybe_save_project():
             return
+        self._close_kb_manager()
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Open Project",
@@ -516,6 +528,8 @@ class MainWindow(QMainWindow):
         self.project.knowledge_base_dir = directory
         self._set_project_modified(True)
         self._update_kb_indicator()
+        if self._kb_manager is not None:
+            self._kb_manager.refresh_kb_root(directory)
         self.status.showMessage(f"Knowledge base set to {directory}")
 
     def _clear_kb_directory(self) -> None:
@@ -524,6 +538,8 @@ class MainWindow(QMainWindow):
         self.project.knowledge_base_dir = None
         self._set_project_modified(True)
         self._update_kb_indicator()
+        if self._kb_manager is not None:
+            self._kb_manager.refresh_kb_root(None)
         self.status.showMessage("Knowledge base directory cleared")
 
     def _update_kb_indicator(self) -> None:
@@ -533,6 +549,58 @@ class MainWindow(QMainWindow):
         else:
             self.kb_label.setText("")
             self.kb_label.setToolTip("")
+        # Refresh external-explorer action enable state
+        if hasattr(self, "open_kb_explorer_action"):
+            self.open_kb_explorer_action.setEnabled(
+                not self._busy and self.project.knowledge_base_dir is not None,
+            )
+
+    # ------------------------------------------------------------------
+    # Knowledge-base manager window
+    # ------------------------------------------------------------------
+
+    def _open_kb_manager(self) -> None:
+        """Open (or raise) the non-modal knowledge-base manager window."""
+        if self._kb_manager is None:
+            self._kb_manager = KnowledgeBaseManager(
+                kb_directory=self.project.knowledge_base_dir,
+                parent=self,
+            )
+            self._kb_manager.kb_directory_changed.connect(
+                self._on_kb_directory_changed,
+            )
+        else:
+            self._kb_manager.refresh_kb_root(self.project.knowledge_base_dir)
+        self._kb_manager.show()
+        self._kb_manager.raise_()
+        self._kb_manager.activateWindow()
+
+    def _on_kb_directory_changed(self, directory: str) -> None:
+        """Slot for KnowledgeBaseManager.kb_directory_changed."""
+        self.project.knowledge_base_dir = directory if directory else None
+        self._update_kb_indicator()
+        self._set_project_modified(True)
+        self.status.showMessage(
+            f"Knowledge base {'cleared' if not directory else 'set to ' + directory}",
+        )
+
+    def _open_kb_directory_externally(self) -> None:
+        """Open the KB directory in the OS file explorer."""
+        if not self.project.knowledge_base_dir:
+            QMessageBox.information(
+                self,
+                "No directory",
+                "No knowledge-base directory is configured.",
+            )
+            return
+        open_external(self.project.knowledge_base_dir)
+
+    def _close_kb_manager(self) -> None:
+        """Close the KB manager if it is open."""
+        if self._kb_manager is not None:
+            self._kb_manager.close()
+            self._kb_manager.deleteLater()
+            self._kb_manager = None
 
     def add_prompt(self) -> None:
         output_field, accepted = QInputDialog.getText(
@@ -975,8 +1043,10 @@ class MainWindow(QMainWindow):
             self.settings_action,
             self.edit_original_action,
             self.edit_result_action,
+            self.manage_kb_action,
             self.set_kb_directory_action,
             self.clear_kb_directory_action,
+            self.open_kb_explorer_action,
         ]:
             action.setEnabled(not busy)
         processing_actions_enabled = not busy and self._worker_thread is None
@@ -1009,8 +1079,12 @@ class MainWindow(QMainWindow):
         self.edit_original_button.setEnabled(not self._busy and has_left_field)
         self.edit_result_button.setEnabled(not self._busy and has_right_field)
         kb_actions_enabled = not self._busy
+        self.manage_kb_action.setEnabled(kb_actions_enabled)
         self.set_kb_directory_action.setEnabled(kb_actions_enabled)
         self.clear_kb_directory_action.setEnabled(kb_actions_enabled)
+        self.open_kb_explorer_action.setEnabled(
+            kb_actions_enabled and self.project.knowledge_base_dir is not None,
+        )
 
     def on_selection_changed(self) -> None:
         self._refresh_current_selection()
