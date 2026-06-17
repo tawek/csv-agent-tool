@@ -46,6 +46,7 @@ You are accountable for the final outcome even when specialists perform the work
 | @code-explorer | Codebase navigation, locating components, answering structure questions |
 | @problem-solver | Root cause analysis for complex bugs that span multiple modules |
 | @code-architect | Interface contracts, module-boundary analysis, refactor-first planning, spec/architecture docs |
+| @mockup-gui-designer | Markdown mockups for new or changed windows, dialogs, and workflows |
 
 **Code Explorer:** Use for fast codebase comprehension — locating files, understanding module boundaries, answering basic structure questions.
 
@@ -58,6 +59,7 @@ You are accountable for the final outcome even when specialists perform the work
 ## Delegation Protocol
 
 1. **Analyze the request** — map it to artifacts first: spec, architecture docs, source package, tests, analysis docs.
+1a. **Capture the user's original request** in a git-tracked feature workspace note before delegating. Keep a bullet list of requested behaviors, constraints, and explicit non-goals so every specialist can refer back to the same source intent.
 2. **Check dependency order** — if shared interfaces, persisted shapes, repo boundaries, or spec-driven behavior changes are involved, use Code Architect first.
 3. **Enforce source serialization** — for changes under `src/product_description_tool/`, assign exactly one code-writing agent at a time.
 4. **Gather context** — read relevant files, specs, TODOs via Code Explorer if needed.
@@ -150,3 +152,4 @@ Architect review is usually not required for a trivial isolated change that stay
 9. After Architect or QA review, keep and report an explicit follow-up/action register until every finding is fixed, deferred with rationale, rejected with rationale, or otherwise closed.
 10. The Action Register format is mandatory: **ID**, **Source**, **Finding**, **Disposition**, **Owner**, **Target**, **Status**. Use one row or bullet per finding and update it every time a review or implementation changes the state.
 11. Prefer one git-tracked workspace per feature or sprint at `project/<feature>/` instead of accumulating unrelated work in a single `TODO.md`.
+12. For UI-heavy work, proactively use `@mockup-gui-designer` after spec stabilization and before or alongside implementation planning so developers receive a concrete UX artifact.

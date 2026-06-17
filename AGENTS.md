@@ -84,11 +84,12 @@ Follow the spec-first workflow for any feature, bug fix, or behavior change. Kee
 **Entry criteria:** A feature request, bug report, or behavior change has been identified. No code has been written yet.
 
 1. **Understand the change.** Determine whether this is a new feature, a modification to existing behavior, or a bug fix.
-2. **Update `docs/specification.md`** to describe the correct expected behavior:
+2. **Capture the user's original intent verbatim or near-verbatim** in the feature workspace before delegating downstream work. Create or update `project/<feature>/implementation-notes.md` (or a dedicated `request.md`) with a short bullet list of requested behaviors, constraints, and explicit non-goals. Treat this note as the anchor input for Architect, Developer, QA, and any design specialists.
+3. **Update `docs/specification.md`** to describe the correct expected behavior:
    - For new features: add a Use Case section describing the actor, trigger, flow, and invariants.
    - For bug fixes: update the relevant Use Case to describe the *correct* behavior.
    - For behavior modifications: update the affected Use Case(s).
-3. **Present or summarize the spec changes** to the user before or alongside implementation work, depending on the task flow. Do not skip the spec update when one is required.
+4. **Present or summarize the spec changes** to the user before or alongside implementation work, depending on the task flow. Do not skip the spec update when one is required.
 
 #### Step 2: Implement
 
@@ -227,13 +228,16 @@ project-specific knowledge embedded in its system prompt.
 | `product-developer-junior.md` | Product Developer (Junior) | `llamacpp/qwen3.6-35b-a3b` | — |
 | `qa-engineer.md` | QA Engineer (Senior) | `opencode/deepseek-v4-flash-free` | — |
 | `code-explorer.md` | Code Explorer | `opencode/deepseek-v4-flash-free` | — |
+| `mockup-gui-designer.md` | Mockup GUI Designer | `openai/gpt-5.4` | medium |
 
 ### Usage
 
 - **Primary agent**: `leader`
-- **Specialists**: `@product-developer`, `@product-developer-junior`, `@qa-engineer`, `@code-explorer`, `@problem-solver`, `@code-architect`
+- **Specialists**: `@product-developer`, `@product-developer-junior`, `@qa-engineer`, `@code-explorer`, `@problem-solver`, `@code-architect`, `@mockup-gui-designer`
 
 The `leader` agent has direct authority to define and maintain team coordination rules and agent configuration in `AGENTS.md` and files under `.opencode/agents/`, and may edit those files directly. In normal operation, the leader should still delegate application code, specs, and tests to the appropriate specialists rather than taking on that product work personally.
+
+`@code-explorer` should use the `vector-db` skill proactively for broad, semantic, or cross-cutting exploration, while still confirming concrete claims with direct file reads/searches.
 
 ### Persistent Outputs
 
@@ -241,6 +245,19 @@ The `leader` agent has direct authority to define and maintain team coordination
 - **Architecture docs**: `docs/architecture/<prefix>-*.md`
 - **QA reports**: `docs/qa/<prefix>-*.md`
 - **Feature workspaces**: `project/<feature>/` containing scoped planning and review artifacts such as `action-register.md`, `reviews.md`, `implementation-notes.md`, and `status.md`
+- **UI mockups**: `project/<feature>/mockups/` containing markdown mockups that translate approved specs into developer-facing UX layouts
+
+### Mockup GUI Designer
+
+Use `@mockup-gui-designer` when a feature introduces or significantly changes user-facing views, dialogs, workflows, or information architecture.
+
+Responsibilities:
+- read the spec and the captured user-intent note,
+- distill them into markdown mockups of windows, dialogs, panels, actions, and interaction notes,
+- keep those mockups as stable developer inputs under `project/<feature>/mockups/`, and
+- avoid implementation, testing, or product-contract changes.
+
+The mockup designer is an input artifact producer for UX clarity; it does not overrule the user, spec, architect, or product developer.
 
 ### Parallel Work Limits
 
@@ -258,6 +275,7 @@ The `leader` agent has direct authority to define and maintain team coordination
 | Problem Solver | allow | deny | allow | deny |
 | Code Architect | allow | allow (`docs/specification.md`, `docs/architecture/`) | allow | deny |
 | Product Developer | allow | allow (`src/product_description_tool/`, `packaging/`) | allow | deny |
+| Mockup GUI Designer | allow | allow (`project/**/mockups/**/*.md`, `project/**/mockups/*.md`, `project/**/implementation-notes.md`, `docs/specification.md`) | allow | deny |
 | Product Developer (Junior) | allow | allow (`src/product_description_tool/`, `packaging/`) | allow | deny |
 | QA Engineer | allow | allow (tests/) | allow | deny |
 | Code Explorer | allow | deny | allow | deny |

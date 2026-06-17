@@ -50,7 +50,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 2. On dismissal of the save prompt or after saving, a new `Project` is created with an empty `CsvConfig` derived from the current app config defaults.
 3. The in-memory `CsvDocument` is reset to empty headers and rows.
 4. The project path, external CSV path, project-scoped knowledge-base directory, and all filters are cleared.
-5. The UI is refreshed: prompt controls, table view, and preview selectors are reset.
+5. The UI is refreshed: prompt controls, the reusable prompt editor, table view, preview selectors, and knowledge-base management state are reset.
 
 **Postconditions:** A clean slate with no rows, no prompts, and no saved project file.
 
@@ -73,7 +73,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 5. For each prompt with a `prompt_file` sidecar, the prompt text is read from the sibling `.prompt.txt` file.
 6. The repository resolves the sibling CSV path (e.g., `catalog.project.json` maps to `catalog.csv`). If the sibling CSV exists, it is loaded using the project's `CsvConfig`. Otherwise, an empty `CsvDocument` is constructed from the project's field keys and prompt output fields.
 7. The current project, document, and paths are set. Any configured knowledge-base directory becomes the active project-scoped knowledge-base root. Filters are cleared.
-8. Prompt controls, table view, and preview selectors are refreshed.
+8. Prompt controls, the reusable prompt editor, table view, preview selectors, and knowledge-base management state are refreshed.
 
 **Postconditions:** The project prompts, CSV data, and field metadata are all loaded and visible in the UI.
 
@@ -240,24 +240,25 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Description:** The user writes or modifies the prompt template text for the selected output column.
 
-**Trigger:** User types in the prompt editor text area in the Prompts panel.
+**Trigger:** User types in the prompt editor in the Prompts panel.
 
 **Preconditions:** A prompt is selected.
 
 **Flow:**
 
 1. Template text uses `{{column_name}}` placeholders that are substituted from CSV row data at processing time.
-2. On every change, the `ProjectPrompt.prompt` field is updated. The dirty flag is set.
-3. Template text may use two placeholder forms:
+2. The prompt editor is a reusable embedded markdown-capable text editor. It supports plain-text prompt editing in the Prompts panel and provides markdown syntax highlighting while the user edits.
+3. On every change, the `ProjectPrompt.prompt` field is updated. The dirty flag is set.
+4. Template text may use two placeholder forms:
    - `{{column_name}}` references a CSV column or another prompt output field.
    - `{{@relative/path.ext}}` references a knowledge-base file within the project's configured knowledge-base directory.
-4. Knowledge-base references are project-scoped:
+5. Knowledge-base references are project-scoped:
    - The knowledge-base directory is configured per project.
    - Supported referenced file types are `.md`, `.markdown`, and `.csv`.
    - Referenced paths are interpreted relative to the configured knowledge-base directory.
    - Referenced paths must not escape the configured knowledge-base directory.
    - Included file content is inserted verbatim into the rendered prompt and is not recursively rendered for additional placeholders.
-5. The template is validated before preview or batch processing starts:
+6. The template is validated before preview or batch processing starts:
    - Unknown `{{column_name}}` placeholders cause an error dialog.
    - Every `{{@...}}` reference must resolve to an existing supported file within the configured knowledge-base directory.
    - Missing, unsupported, unreadable, or escaping knowledge-base references cause an error dialog and block preview and processing.
@@ -516,6 +517,7 @@ User clicks the `+` or `-` button in any pane header.
    - A project may store a configured knowledge-base directory in its manifest.
    - When possible, the stored knowledge-base directory path is relative to the `.project.json` file location.
    - If a relative representation is not possible, an absolute path may be stored.
+   - The knowledge-base directory setting is saved separately from the files inside that directory; saving the project persists the directory reference only.
 3. **On load:** Prompts with `prompt_file` references have their text read from sidecars. The sibling CSV is loaded if present. If a knowledge-base directory is configured, it is resolved relative to the project file when stored as a relative path.
 4. Column naming: prompt output fields are sanitized to alphanumeric, dot, underscore, and hyphen characters, replacing all others with underscores.
 
@@ -538,6 +540,112 @@ User clicks the `+` or `-` button in any pane header.
 3. The application quits.
 
 **Postconditions:** The application process terminates. Configuration is saved.
+
+## Use Case 21: Manage the Project Knowledge Base
+
+**Actor:** User
+
+**Description:** The user manages the current project's knowledge-base directory and browses its files in a dedicated management window.
+
+**Trigger:** User opens the knowledge-base management window from the main application UI.
+
+**Preconditions:** A project session is active.
+
+**Flow:**
+
+1. A separate knowledge-base management window opens for the current project.
+2. The window shows the currently configured project-scoped knowledge-base directory, if any.
+3. The user may set or change the knowledge-base directory by browsing for a folder.
+4. The user may clear the configured knowledge-base directory.
+5. The window provides a file and directory explorer rooted at the configured knowledge-base directory.
+6. If no knowledge-base directory is configured, file-browsing and file-management actions that require a root directory are unavailable until the user sets one.
+7. The user may ask the application to open the knowledge-base directory in the operating system's external file explorer.
+8. Changes to the configured knowledge-base directory are applied to the current project and are persisted on the next project save.
+
+**Postconditions:** The project has either no knowledge-base directory or one active knowledge-base root that is available for prompt references and browsing.
+
+**Error conditions:** Invalid, unreadable, or inaccessible directories are rejected and reported to the user.
+
+## Use Case 22: Browse and Manage Knowledge-Base Files
+
+**Actor:** User
+
+**Description:** The user browses project knowledge-base files and performs the requested file-management actions from the knowledge-base management window.
+
+**Trigger:** User selects items and actions in the knowledge-base explorer.
+
+**Preconditions:** A project-scoped knowledge-base directory is configured and accessible.
+
+**Flow:**
+
+1. The explorer displays folders and files under the configured knowledge-base directory.
+2. The user may navigate through subdirectories within that root.
+3. For any file, the application always offers an external viewer or editor action that opens the selected file with the operating system's default associated application.
+4. The user may copy a file within the knowledge-base root.
+5. The user may rename a file within the knowledge-base root.
+6. The application may also offer file deletion within the knowledge-base root.
+7. If deletion is offered and the user invokes it, the application shows a confirmation dialog identifying the file to be removed before deletion completes.
+8. After a successful copy, rename, or delete action, the explorer refreshes to show the current filesystem state.
+
+**Postconditions:** The knowledge-base directory contents reflect any completed copy, rename, or delete action.
+
+**Error conditions:** Failed filesystem operations, naming conflicts, or attempts to operate outside the configured knowledge-base root are rejected and reported to the user.
+
+## Use Case 26: View or Edit a Knowledge-Base Markdown or Text File
+
+**Actor:** User
+
+**Description:** The user opens a knowledge-base markdown or text file in a modal embedded editor.
+
+**Trigger:** User chooses a view or edit action for a supported knowledge-base text file from the knowledge-base explorer.
+
+**Preconditions:** A project-scoped knowledge-base directory is configured, the selected file exists within that directory, and its type is `.md` or `.txt`.
+
+**Flow:**
+
+1. The application opens a modal embedded text editor dialog for the selected file.
+2. The dialog exposes **Save** and **Cancel** buttons.
+3. The current file contents are loaded into the editor.
+4. Markdown files (`.md`) display markdown syntax highlighting in the embedded editor.
+5. Plain-text files (`.txt`) display as editable text without requiring an external application.
+6. The user edits the file and chooses one of the following outcomes:
+   - **Save:** the file is written back to disk and the dialog closes.
+   - **Cancel:** the dialog closes without saving changes.
+7. The dialog also provides an action to open the same file in an external viewer or editor.
+8. After saving, the knowledge-base explorer refreshes any visible metadata affected by the change.
+
+**Postconditions:** The selected text file is either unchanged (cancel) or saved with the user's edits.
+
+**Error conditions:** Unsupported file types for embedded text editing, unreadable files, or save failures are reported to the user.
+
+## Use Case 27: View or Edit a Knowledge-Base CSV File
+
+**Actor:** User
+
+**Description:** The user opens a knowledge-base CSV file in a modal grid editor with simple spreadsheet behavior.
+
+**Trigger:** User chooses a view or edit action for a CSV file from the knowledge-base explorer.
+
+**Preconditions:** A project-scoped knowledge-base directory is configured and the selected CSV file exists within that directory.
+
+**Flow:**
+
+1. The application opens a modal CSV editor dialog for the selected file.
+2. The dialog exposes **Save** and **Cancel** buttons.
+3. Before showing the grid, the application heuristically detects the CSV settings needed to open the file.
+4. The file contents are shown in a grid or table.
+5. The user may edit existing text cells, enter text into empty cells, and clear or replace text cell values.
+6. The dialog supports adding and removing rows.
+7. The dialog supports adding and removing columns.
+8. The dialog provides an action to open the same CSV file in an external viewer or editor.
+9. The user chooses one of the following outcomes:
+     - **Save:** the CSV file is written back to disk and the dialog closes.
+     - **Cancel:** the dialog closes without saving changes.
+10. After saving, the knowledge-base explorer refreshes any visible metadata affected by the change.
+
+**Postconditions:** The selected CSV file is either unchanged (cancel) or saved with the user's grid edits.
+
+**Error conditions:** CSV parsing failures, unsupported encodings, unreadable files, or save failures are reported to the user.
 
 ## Use Case 23: Strip Whitespace from HTML Columns on Export
 
@@ -625,6 +733,7 @@ User clicks the `+` or `-` button in any pane header.
 | `FilterDialog` | `dialogs.py` | Per-column wildcard text filtering UI |
 | `ExportDialog` | `dialogs.py` | Target path selection, visibility checkbox, and overwrite confirmation for CSV export |
 | `HtmlEditorDialog` | `dialogs.py` | Manual HTML cell editing with syntax highlighting |
+| Knowledge-base management window and embedded file editors | `main_window.py` / `dialogs.py` | Project-scoped knowledge-base directory selection, browsing, file operations, external open actions, and modal embedded editing for supported files |
 | `WildcardFilterProxyModel` | `filter_proxy.py` | Qt proxy model for case-insensitive fnmatch filtering |
 | `CsvTableModel` | `table_model.py` | Qt table model backing the CSV data grid |
 | `HtmlPreview` | `preview.py` | HTML rendering widget with content statistics |
@@ -639,6 +748,9 @@ User clicks the `+` or `-` button in any pane header.
 - Filtering affects the table view display and the scope of "Process Visible Rows". It does not modify or remove data.
 - Prompt templates can reference any CSV column by name via `{{column_name}}` placeholders.
 - Prompt templates can also reference project-scoped knowledge-base files via `{{@relative/path.ext}}`; only `.md`, `.markdown`, and `.csv` files are supported, paths are resolved relative to the configured knowledge-base directory, escaping that directory is forbidden, and included content is inserted verbatim without recursive rendering.
+- The application provides a separate project-scoped knowledge-base management window for setting or clearing the knowledge-base directory, browsing files under that root, performing copy/rename actions within that root, optionally deleting files there with confirmation, opening files externally, and opening supported files in modal embedded editors.
+- Embedded knowledge-base editors are modal dialogs with explicit Save and Cancel actions.
+- The reusable embedded markdown-capable editor is used both for prompt editing in the main window and for embedded editing of markdown knowledge-base files.
 - The default CSV delimiter is `;` (semicolon). New projects, fresh installs, and any persisted CSV config missing a delimiter value use this delimiter unless the user changes it in Settings.
 - The default `export_only_visible` setting is `True`. New projects, fresh installs, and any persisted CSV config missing that value use `True` as the effective setting until the user changes it.
 - Generation parameters (temperature, top_p, max_output_tokens) apply to all providers and are shared across prompts in a single run.
