@@ -14,7 +14,7 @@ Build a Windows executable for Product Description Tool using a remote Windows m
 
 ## Prerequisites
 
-The remote build environment (venv + dependencies) is set up once. Subsequent builds only need steps 4–10.
+The remote build environment (venv + source checkout) is set up once. Every build must still refresh Python requirements on the remote machine so new project dependencies are bundled into the Windows artifact.
 
 ### One-Time Setup (Steps 1–3)
 
@@ -32,14 +32,14 @@ ssh gfl@192.168.1.13 \
   'cmd.exe /c "C:\Users\gfl\build-env\Scripts\python.exe -m pip install --upgrade pip"'
 ```
 
-**Step 2 — Install Dependencies on Remote**
+**Step 2 — Install Baseline Build Tooling on Remote**
 
 ```bash
 ssh gfl@192.168.1.13 \
-  'cmd.exe /c "C:\Users\gfl\build-env\Scripts\python.exe -m pip install pyinstaller httpx openai platformdirs PySide6"'
+  'cmd.exe /c "C:\Users\gfl\build-env\Scripts\python.exe -m pip install pyinstaller"'
 ```
 
-This downloads PySide6 (~250 MB). Expect 2–5 minutes.
+This installs only the baseline build tool. Project runtime dependencies are refreshed from `pyproject.toml` during every build.
 
 **Step 3 — Clone Source on Remote**
 
@@ -49,7 +49,7 @@ ssh gfl@192.168.1.13 'cd /home/gfl && git clone git@github.com:tawek/csv-agent-t
 
 ---
 
-## Standard Build (Steps 4–7)
+## Standard Build (Steps 4–8)
 
 ### Clean Temp Directory
 
@@ -78,7 +78,18 @@ Always push the latest local source to the remote to avoid stale builds. Use `gi
 git archive --format=tar HEAD | ssh gfl@192.168.1.13 'tar -xC /home/gfl/csv-agent-tool --strip-components=0'
 ```
 
-**Step 6 — Build with PyInstaller**
+**Step 6 — Refresh Remote Python Requirements**
+
+Always reinstall the current project dependencies on the remote builder before packaging. Do not rely on a one-time remote `pip install` list because new dependencies will otherwise be missing from the packaged app.
+
+```bash
+uv run python -c "import tomllib, pathlib; data = tomllib.loads(pathlib.Path('pyproject.toml').read_text()); print('\n'.join(data['project']['dependencies'] + data['project']['optional-dependencies']['dev']))" \
+  | ssh gfl@192.168.1.13 'xargs -r "/cygdrive/c/Users/gfl/build-env/Scripts/python.exe" -m pip install'
+```
+
+This keeps the remote build environment aligned with the current `pyproject.toml` dependency set, including packaged runtime dependencies such as MarkItDown and its conversion extras.
+
+**Step 7 — Build with PyInstaller**
 
 Run the build; it will release the lock when finished (success or failure):
 
@@ -102,7 +113,7 @@ ssh gfl@192.168.1.13 \
 
 Build takes ~2 minutes.
 
-**Step 7 — Add install.bat**
+**Step 8 — Add install.bat**
 
 Copy the installation script into the dist directory:
 
@@ -114,7 +125,7 @@ The `install.bat` script copies the application from wherever it was downloaded 
 
 ---
 
-**Step 8 — Retrieve the Build (Tar Stream)**
+**Step 9 — Retrieve the Build (Tar Stream)**
 
 Do **not** use `scp` — it is extremely slow for 500+ MB of small files. Use tar streaming instead:
 
@@ -135,7 +146,7 @@ du -sh "$BUILD_DIR/product-description-tool/"
 # Should be ~120 MB total. If ~550 MB+, the spec excludes were not applied — do NOT upload.
 ```
 
-**Step 9 — Upload to Google Drive**
+**Step 10 — Upload to Google Drive**
 
 Check rclone token expiry first. If expired, re-authenticate:
 
@@ -173,31 +184,35 @@ ssh gfl@192.168.1.13 \
 # 2. Sync fresh source
 git archive --format=tar HEAD | ssh gfl@192.168.1.13 'tar -xC /home/gfl/csv-agent-tool --strip-components=0'
 
-# 3. Build (lock is removed on success)
+# 3. Refresh remote Python requirements from pyproject.toml
+uv run python -c "import tomllib, pathlib; data = tomllib.loads(pathlib.Path('pyproject.toml').read_text()); print('\n'.join(data['project']['dependencies'] + data['project']['optional-dependencies']['dev']))" \
+  | ssh gfl@192.168.1.13 'xargs -r "/cygdrive/c/Users/gfl/build-env/Scripts/python.exe" -m pip install'
+
+# 4. Build (lock is removed on success)
 ssh gfl@192.168.1.13 \
   'cmd.exe /c "set PYTHONPATH=C:\cygwin64\home\gfl\csv-agent-tool\src && cd /d C:\cygwin64\home\gfl\csv-agent-tool && C:\Users\gfl\build-env\Scripts\python.exe -m PyInstaller --clean --noconfirm packaging\product_description_tool.spec" && rmdir /home/gfl/.build.lock'
 
-# 4. Add install.bat to dist
+# 5. Add install.bat to dist
 scp packaging/install.bat gfl@192.168.1.13:/home/gfl/csv-agent-tool/dist/product-description-tool/
 
-# 5. Retrieve via tar stream
+# 6. Retrieve via tar stream
 ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-description-tool' | tar -C "$BUILD_DIR" -xzf -
 
-# 6. Verify size before upload
+# 7. Verify size before upload
 du -sh "$BUILD_DIR/product-description-tool/"
 # If >200 MB, abort — spec excludes were not applied correctly
 
-# 7. Check token and upload
+# 8. Check token and upload
 rclone ls GoogleDrive:WFirma/product-description-tool/ > /dev/null 2>&1 || \
   rclone authorize "drive" "<client_id> <client_secret>"
 rclone copy "$BUILD_DIR/product-description-tool/" GoogleDrive:WFirma/product-description-tool/ \
   --transfers=4 --checkers=8
 
-# 8. Verify size
+# 9. Verify size
 rclone size GoogleDrive:WFirma/product-description-tool/
 # Should report ~170-200 objects, ~120-140 MiB
 
-# 9. Clean up temp directory (only on success — leave on failure for post-mortem)
+# 10. Clean up temp directory (only on success — leave on failure for post-mortem)
 rclone size GoogleDrive:WFirma/product-description-tool/ >/dev/null 2>&1 && rm -rf "$BUILD_DIR"
 ```
 
