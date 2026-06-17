@@ -36,7 +36,12 @@ from product_description_tool import message_box, file_dialog
 from product_description_tool.config import (
     AppConfig,
     CsvConfig,
+    CsvWriteSettings,
     FieldConfig,
+    GenerationConfig,
+    OllamaConfig,
+    OpenAIConfig,
+    ProviderConfig,
 )
 from product_description_tool.generation import estimate_tokens_from_chars
 from product_description_tool.highlighter import HtmlSyntaxHighlighter
@@ -789,55 +794,60 @@ class SettingsDialog(QDialog):
 
     def get_config(self) -> AppConfig:
         csv_fields = self._collect_fields()
-        config = AppConfig.from_dict(
-            {
-                "provider": {
-                    "active": self.active_provider_combo.currentText(),
-                    "ollama": {
-                        "base_url": self.ollama_base_url_edit.text().strip(),
-                        "model": self.ollama_model_combo.currentText().strip(),
-                        "options": self._parse_json(
-                            self.ollama_options_edit.toPlainText(),
-                            "Ollama options JSON",
-                        ),
-                    },
-                    "openai": {
-                        "base_url": self.openai_base_url_edit.text().strip(),
-                        "api_key": self.openai_api_key_edit.text().strip(),
-                        "model": self.openai_model_combo.currentText().strip(),
-                        "options": self._parse_json(
-                            self.openai_options_edit.toPlainText(),
-                            "OpenAI options JSON",
-                        ),
-                    },
-                },
-                "generation": {
-                    "temperature": self.temperature_spin.value(),
-                    "top_p": self.top_p_spin.value(),
-                    "max_output_tokens": self.max_tokens_spin.value(),
-                    "enable_thinking": self.enable_thinking_checkbox.isChecked(),
-                },
-                "csv": {
-                    "fields": {key: asdict(value) for key, value in csv_fields.items()},
-                    "export-order": self._collect_export_order(),
-                    "delimiter": self._single_char_value(
-                        self.delimiter_edit.text(),
-                        "Delimiter",
-                        ",",
-                    ),
-                    "quotechar": self._single_char_value(
-                        self.quotechar_edit.text(),
-                        "Quote char",
-                        '"',
-                    ),
-                    "encoding": self.encoding_edit.text().strip() or "utf-8-sig",
-                    "newline": self.newline_edit.text(),
-                    "write_header": self.write_header_checkbox.isChecked(),
-                    "export-only-visible": self.export_only_visible_checkbox.isChecked(),
-                },
-            }
+        # Build the export settings from the form controls; preserve the
+        # import settings that were loaded when the dialog was opened.
+        export_settings = CsvWriteSettings(
+            delimiter=self._single_char_value(
+                self.delimiter_edit.text(),
+                "Delimiter",
+                ";",
+            ),
+            quotechar=self._single_char_value(
+                self.quotechar_edit.text(),
+                "Quote char",
+                '"',
+            ),
+            encoding=self.encoding_edit.text().strip() or "utf-8-sig",
+            newline=self.newline_edit.text(),
+            write_header=self.write_header_checkbox.isChecked(),
+            export_only_visible=self.export_only_visible_checkbox.isChecked(),
+            export_order=self._collect_export_order(),
+            fields=csv_fields,
         )
-        return config
+        csv_config = CsvConfig(
+            import_settings=self._config.csv.import_settings,
+            export_settings=export_settings,
+            export_settings_initialized=True,
+        )
+        return AppConfig(
+            provider=ProviderConfig(
+                active=self.active_provider_combo.currentText(),
+                ollama=OllamaConfig(
+                    base_url=self.ollama_base_url_edit.text().strip(),
+                    model=self.ollama_model_combo.currentText().strip(),
+                    options=self._parse_json(
+                        self.ollama_options_edit.toPlainText(),
+                        "Ollama options JSON",
+                    ),
+                ),
+                openai=OpenAIConfig(
+                    base_url=self.openai_base_url_edit.text().strip(),
+                    api_key=self.openai_api_key_edit.text().strip(),
+                    model=self.openai_model_combo.currentText().strip(),
+                    options=self._parse_json(
+                        self.openai_options_edit.toPlainText(),
+                        "OpenAI options JSON",
+                    ),
+                ),
+            ),
+            generation=GenerationConfig(
+                temperature=self.temperature_spin.value(),
+                top_p=self.top_p_spin.value(),
+                max_output_tokens=self.max_tokens_spin.value(),
+                enable_thinking=self.enable_thinking_checkbox.isChecked(),
+            ),
+            csv=csv_config,
+        )
 
 
 class ExportDialog(QDialog):

@@ -24,37 +24,77 @@ class FieldConfig:
 
 
 @dataclass(slots=True)
-class CsvConfig:
-    export_path: str = ""
-    export_only_visible: bool = True
-    export_order: list[str] = field(default_factory=list)
-    fields: dict[str, FieldConfig] = field(default_factory=dict)
+class CsvReadSettings:
+    """Low-level parsing settings for CSV import/open.
+
+    These are the settings established by auto-detection or fallback defaults
+    and are used when reading CSV data into memory.
+    """
+    delimiter: str = ";"
+    quotechar: str = '"'
+    encoding: str = "utf-8-sig"
+    newline: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CsvReadSettings":
+        return cls(
+            delimiter=data.get("delimiter", ";") or ";",
+            quotechar=data.get("quotechar", '"') or '"',
+            encoding=data.get("encoding", "utf-8-sig"),
+            newline=data.get("newline", ""),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "delimiter": self.delimiter,
+            "quotechar": self.quotechar,
+            "encoding": self.encoding,
+            "newline": self.newline,
+        }
+
+
+@dataclass(slots=True)
+class CsvWriteSettings:
+    """Export-oriented CSV settings for project save and explicit export.
+
+    Includes all low-level parsing attributes plus export metadata such as
+    column order, header writing, field labels/visibility, and export path.
+    """
     delimiter: str = ";"
     quotechar: str = '"'
     encoding: str = "utf-8-sig"
     newline: str = ""
     write_header: bool = True
+    export_path: str = ""
+    export_only_visible: bool = True
+    export_order: list[str] = field(default_factory=list)
+    fields: dict[str, FieldConfig] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CsvConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "CsvWriteSettings":
         fields = {
             key: FieldConfig.from_dict(value)
             for key, value in data.get("fields", {}).items()
         }
         return cls(
-            export_path=data.get("export-path", ""),
-            export_only_visible=bool(data.get("export-only-visible", True)),
-            export_order=list(data.get("export-order", [])),
-            fields=fields,
             delimiter=data.get("delimiter", ";") or ";",
             quotechar=data.get("quotechar", '"') or '"',
             encoding=data.get("encoding", "utf-8-sig"),
             newline=data.get("newline", ""),
             write_header=bool(data.get("write_header", True)),
+            export_path=data.get("export-path", ""),
+            export_only_visible=bool(data.get("export-only-visible", True)),
+            export_order=list(data.get("export-order", [])),
+            fields=fields,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        result: dict[str, Any] = {
+        return {
+            "delimiter": self.delimiter,
+            "quotechar": self.quotechar,
+            "encoding": self.encoding,
+            "newline": self.newline,
+            "write_header": self.write_header,
             "export-path": self.export_path,
             "export-only-visible": self.export_only_visible,
             "export-order": self.export_order,
@@ -62,13 +102,121 @@ class CsvConfig:
                 key: asdict(value)
                 for key, value in self.fields.items()
             },
-            "delimiter": self.delimiter,
-            "quotechar": self.quotechar,
-            "encoding": self.encoding,
-            "newline": self.newline,
-            "write_header": self.write_header,
         }
-        return result
+
+
+@dataclass
+class CsvConfig:
+    """Container for separated import and export CSV settings.
+
+    Backward-compatible properties on this class delegate to ``export_settings``
+    so existing code that accesses ``csv.delimiter``, ``csv.fields`` etc. still
+    works without changes.
+    """
+    import_settings: CsvReadSettings = field(default_factory=CsvReadSettings)
+    export_settings: CsvWriteSettings = field(default_factory=CsvWriteSettings)
+    export_settings_initialized: bool = False
+
+    # -- Backward-compatible forwarding properties ---------------------------
+
+    @property
+    def delimiter(self) -> str:
+        return self.export_settings.delimiter
+
+    @delimiter.setter
+    def delimiter(self, value: str) -> None:
+        self.export_settings.delimiter = value
+
+    @property
+    def quotechar(self) -> str:
+        return self.export_settings.quotechar
+
+    @quotechar.setter
+    def quotechar(self, value: str) -> None:
+        self.export_settings.quotechar = value
+
+    @property
+    def encoding(self) -> str:
+        return self.export_settings.encoding
+
+    @encoding.setter
+    def encoding(self, value: str) -> None:
+        self.export_settings.encoding = value
+
+    @property
+    def newline(self) -> str:
+        return self.export_settings.newline
+
+    @newline.setter
+    def newline(self, value: str) -> None:
+        self.export_settings.newline = value
+
+    @property
+    def write_header(self) -> bool:
+        return self.export_settings.write_header
+
+    @write_header.setter
+    def write_header(self, value: bool) -> None:
+        self.export_settings.write_header = value
+
+    @property
+    def export_path(self) -> str:
+        return self.export_settings.export_path
+
+    @export_path.setter
+    def export_path(self, value: str) -> None:
+        self.export_settings.export_path = value
+
+    @property
+    def export_only_visible(self) -> bool:
+        return self.export_settings.export_only_visible
+
+    @export_only_visible.setter
+    def export_only_visible(self, value: bool) -> None:
+        self.export_settings.export_only_visible = value
+
+    @property
+    def export_order(self) -> list[str]:
+        return self.export_settings.export_order
+
+    @export_order.setter
+    def export_order(self, value: list[str]) -> None:
+        self.export_settings.export_order = value
+
+    @property
+    def fields(self) -> dict[str, FieldConfig]:
+        return self.export_settings.fields
+
+    @fields.setter
+    def fields(self, value: dict[str, FieldConfig]) -> None:
+        self.export_settings.fields = value
+
+    # -- Serialisation -------------------------------------------------------
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CsvConfig":
+        # Detect new-style vs legacy flat structure.
+        if "import_settings" in data or "export_settings" in data:
+            return cls(
+                import_settings=CsvReadSettings.from_dict(data.get("import_settings", {})),
+                export_settings=CsvWriteSettings.from_dict(data.get("export_settings", {})),
+                export_settings_initialized=bool(data.get("export_settings_initialized", False)),
+            )
+        # Legacy flat data — treated as export-oriented with both import and
+        # export populated from the same flat values, and export marked as
+        # initialised (legacy data always had concrete values).
+        return cls(
+            import_settings=CsvReadSettings.from_dict(data),
+            export_settings=CsvWriteSettings.from_dict(data),
+            export_settings_initialized=True,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "import_settings": self.import_settings.to_dict(),
+            "export_settings": self.export_settings.to_dict(),
+            "export_settings_initialized": self.export_settings_initialized,
+        }
 
 
 @dataclass(slots=True)
@@ -181,6 +329,7 @@ class ConfigStore:
                 "openai": asdict(config.provider.openai),
             },
             "generation": asdict(config.generation),
+            "csv": config.csv.to_dict(),
         }
         self.path.write_text(
             json.dumps(persisted, indent=2, ensure_ascii=True),

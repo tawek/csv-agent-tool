@@ -1,0 +1,48 @@
+{
+  "prompts": [
+    {
+      "output-field": "sss",
+      "prompt": "Gen some shit",
+      "enabled": true,
+      "prompt-file": "sss.prompt.txt",
+      "attachments": [
+        {
+          "source-type": "kb_file",
+          "source": "architecture/kb-markitdown-conversion-design.md"
+        },
+        {
+          "source-type": "kb_file",
+          "source": "architecture/message-box-abstraction-design.md"
+        },
+        {
+          "source-type": "kb_file",
+          "source": "architecture/qt-dialog-test-safety-audit.md"
+        },
+        {
+          "source-type": "csv_column",
+          "source": "sss"
+        }
+      ]
+    }
+  ],
+  "csv": {
+    "export-path": "",
+    "export-only-visible": true,
+    "export-order": [
+      "sss"
+    ],
+    "fields": {
+      "sss": {
+        "label": "sss",
+        "show": true,
+        "strip_html_whitespace": false
+      }
+    },
+    "delimiter": ";",
+    "quotechar": "\"",
+    "encoding": "utf-8-sig",
+    "newline": "",
+    "write_header": true
+  },
+  "knowledge-base-dir": "docs"
+}

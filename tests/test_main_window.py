@@ -206,6 +206,9 @@ class FakeSettingsDialog:
         }
         self._config.csv.delimiter = ";"
         self._config.csv.quotechar = '"'
+        # The real SettingsDialog always marks export as initialized
+        # because the user explicitly confirmed settings (AR-8).
+        self._config.csv.export_settings_initialized = True
 
     def exec(self) -> bool:
         return True
@@ -1574,3 +1577,234 @@ class TestAttachmentMainWindowUI:
         qtbot.waitUntil(lambda: window.document.rows[1]["desc"] != "")
         assert window.document.rows[0]["desc"] is not None
         assert window.document.rows[1]["desc"] is not None
+
+
+# ── CSV Import/Export Settings Separation ──────────────────────────────────
+
+
+class TestCsvImportExportSettings:
+    """Tests for separated import/export CSV settings and first-import seeding."""
+
+    def test_first_import_seeds_full_export_settings(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """First CSV import seeds *all* parsing settings into export: delimiter,
+        quotechar, encoding, newline (AR-7)."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        assert window.project.csv.export_settings_initialized is False
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+
+        assert window.project.csv.export_settings_initialized is True
+        assert window.project.csv.export_settings.delimiter == ";"
+        assert window.project.csv.export_settings.quotechar == '"'
+        # encoding and newline must also be seeded after first import
+        assert window.project.csv.export_settings.encoding in ("utf-8", "utf-8-sig")
+        assert window.project.csv.export_settings.newline == "\n"
+
+    def test_first_import_persists_full_import_settings(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """First CSV import persists the full detected contract into
+        import_settings: encoding, delimiter, quotechar, newline (AR-6/AR-7)."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+
+        assert window.project.csv.import_settings.delimiter == ";"
+        assert window.project.csv.import_settings.quotechar == '"'
+        assert window.project.csv.import_settings.encoding in ("utf-8", "utf-8-sig")
+        assert window.project.csv.import_settings.newline == "\n"
+
+    def test_subsequent_import_does_not_overwrite_export_settings(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """After first import, later imports must not silently overwrite export settings."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        # First import
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+
+        # Manually change export settings to something different
+        window.project.csv.export_settings.delimiter = "|"
+        window.project.csv.export_settings.quotechar = "'"
+        window.project.csv.export_settings.encoding = "utf-16"
+        window.project.csv.export_settings.newline = "\r\n"
+
+        # Second import with a different file
+        csv_path2 = tmp_path / "products2.csv"
+        csv_path2.write_text("x,y\n1,2\n", encoding="utf-8")
+        _patch_csv_dialog(monkeypatch, csv_path2)
+        window.load_csv()
+
+        # Export settings must retain the manually-set values
+        assert window.project.csv.export_settings.delimiter == "|"
+        assert window.project.csv.export_settings.quotechar == "'"
+        assert window.project.csv.export_settings.encoding == "utf-16"
+        assert window.project.csv.export_settings.newline == "\r\n"
+        assert window.project.csv.export_settings_initialized is True
+
+    def test_export_settings_initialized_after_first_import_only(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """Export settings initialized flag is set after first import."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        assert window.project.csv.export_settings_initialized is False
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+
+        assert window.project.csv.export_settings_initialized is True
+
+    def test_new_project_defaults_not_initialized(self, qtbot, tmp_path: Path) -> None:
+        """Fresh project starts with export_settings_initialized = False."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        assert window.project.csv.export_settings_initialized is False
+
+    def test_open_settings_preserves_import_settings(self, qtbot, tmp_path: Path, monkeypatch) -> None:
+        """Opening and confirming settings preserves existing import settings."""
+        monkeypatch.setattr(
+            "product_description_tool.main_window.SettingsDialog",
+            FakeSettingsDialog,
+        )
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+
+        # Set import settings to something distinct
+        window.project.csv.import_settings.delimiter = "|"
+        window.project.csv.import_settings.encoding = "latin-1"
+
+        window.open_settings()
+
+        # Import settings must not be overwritten by the settings dialog
+        assert window.project.csv.import_settings.delimiter == "|"
+        assert window.project.csv.import_settings.encoding == "latin-1"
+
+    def test_open_settings_before_first_import_marks_export_initialized(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """Opening and confirming project settings *before* the first CSV import
+        marks export settings as established, preventing the first import from
+        silently overwriting the user's manually chosen export settings (AR-8)."""
+        monkeypatch.setattr(
+            "product_description_tool.main_window.SettingsDialog",
+            FakeSettingsDialog,
+        )
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        assert window.project.csv.export_settings_initialized is False
+
+        # User opens Settings (before any import) and confirms
+        window.open_settings()
+
+        # Export settings must now be marked as established
+        assert window.project.csv.export_settings_initialized is True
+
+    def test_first_import_does_not_overwrite_manual_export_settings_after_settings(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """When export settings are marked as initialized (e.g., by having
+        opened Settings), the first (or any subsequent) CSV import must not
+        overwrite the export parsing settings with detected import values (AR-8)."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        # Simulate: user explicitly set export settings via Settings.
+        # Manually set distinct export settings and mark them initialized.
+        window.project.csv.export_settings.delimiter = "|"
+        window.project.csv.export_settings.quotechar = "'"
+        window.project.csv.export_settings.encoding = "utf-16"
+        window.project.csv.export_settings.newline = "\r\n"
+        window.project.csv.export_settings_initialized = True
+
+        # Now import a CSV — the first import.
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+
+        # Export settings must retain the user-chosen values.
+        assert window.project.csv.export_settings.delimiter == "|"
+        assert window.project.csv.export_settings.quotechar == "'"
+        assert window.project.csv.export_settings.encoding == "utf-16"
+        assert window.project.csv.export_settings.newline == "\r\n"
+        assert window.project.csv.export_settings_initialized is True
+
+        # Import settings should reflect the detected file content.
+        assert window.project.csv.import_settings.delimiter == ";"
+        assert window.project.csv.import_settings.quotechar == '"'
+        assert window.project.csv.import_settings.newline == "\n"
+
+    def test_open_settings_updates_config_csv_export_settings_initialized(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """After confirming Settings, both project and app-config level
+        export_settings_initialized must be True (AR-10)."""
+        monkeypatch.setattr(
+            "product_description_tool.main_window.SettingsDialog",
+            FakeSettingsDialog,
+        )
+
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        assert window.project.csv.export_settings_initialized is False
+        assert window.config.csv.export_settings_initialized is False
+
+        window.open_settings()
+
+        # Both project and app-config level must be marked as established
+        assert window.project.csv.export_settings_initialized is True
+        assert window.config.csv.export_settings_initialized is True
+
+    def test_open_settings_persists_export_settings_initialized_after_restart(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """After confirming Settings, the app config is saved with
+        export_settings_initialized=True, which survives ConfigStore
+        save/load round-trip (AR-10 restart scenario)."""
+        monkeypatch.setattr(
+            "product_description_tool.main_window.SettingsDialog",
+            FakeSettingsDialog,
+        )
+
+        store = ConfigStore(tmp_path / "config.json")
+        window = MainWindow(config_store=store)
+        qtbot.addWidget(window)
+        window.show()
+
+        # Open settings to establish export settings
+        window.open_settings()
+
+        # Config is already saved by open_settings; reload from disk.
+        reloaded = store.load()
+
+        # After restart, export_settings_initialized must be True
+        assert reloaded.csv.export_settings_initialized is True
+        # Export values from the fake dialog (semicolons) must be preserved
+        assert reloaded.csv.export_settings.delimiter == ";"
+        assert reloaded.csv.export_settings.quotechar == '"'

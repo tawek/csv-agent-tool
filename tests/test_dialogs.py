@@ -43,6 +43,18 @@ def test_settings_dialog_collects_visibility_and_labels_from_table(qtbot) -> Non
     assert updated.csv.quotechar == '"'
 
 
+def test_settings_dialog_cleared_delimiter_falls_back_to_semicolon(qtbot) -> None:
+    """Clearing the delimiter field falls back to ';' per spec Use Case 1."""
+    config = AppConfig()
+    dialog = SettingsDialog(config)
+    qtbot.addWidget(dialog)
+
+    dialog.delimiter_edit.clear()
+    updated = dialog.get_config()
+
+    assert updated.csv.delimiter == ";"
+
+
 def test_settings_dialog_collects_generation_thinking_flag(qtbot) -> None:
     dialog = SettingsDialog(AppConfig())
     qtbot.addWidget(dialog)

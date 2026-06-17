@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from product_description_tool import message_box, file_dialog, input_dialog
 from product_description_tool.collapsible_panel import CollapsiblePanel, PanelState
-from product_description_tool.config import AppConfig, ConfigStore, CsvConfig, FieldConfig
+from product_description_tool.config import AppConfig, ConfigStore, CsvConfig, CsvWriteSettings, FieldConfig
 from product_description_tool.csv_repository import CsvDocument, CsvRepository
 from product_description_tool.dialogs import (
     ActivityDialog,
@@ -378,7 +378,7 @@ class MainWindow(QMainWindow):
             project = self.project_repository.load(project_path)
             csv_path = self.project_repository.csv_path_for(project_path)
             if csv_path.exists():
-                document = self.csv_repository.load(csv_path, project.csv)
+                document = self.csv_repository.load(csv_path, project.csv.import_settings)
             else:
                 document = self._empty_document_for_project(project)
             self.project = project
@@ -413,7 +413,7 @@ class MainWindow(QMainWindow):
         target_path = self.project_repository.save(target_path, self.project)
         csv_path = self.project_repository.csv_path_for(target_path)
         try:
-            self.csv_repository.save(csv_path, self.document, self.project.csv)
+            self.csv_repository.save(csv_path, self.document, self.project.csv.export_settings)
         except Exception as exc:  # noqa: BLE001
             critical(self, "Save failed", str(exc))
             return False
@@ -433,7 +433,21 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            self.document = self.csv_repository.load(path, self.project.csv)
+            # Step 1: Auto-detect import parsing settings from the file.
+            detected_settings = self.csv_repository.detect_settings(path)
+            # Step 2: Load using the detected settings.
+            detected = self.csv_repository.load(path, detected_settings)
+            # Step 3: Persist the full effective import settings.
+            self.project.csv.import_settings = detected_settings
+            # Step 4: On first import, seed export settings from the
+            #         full detected parsing contract exactly once.
+            if not self.project.csv.export_settings_initialized:
+                self.project.csv.export_settings.delimiter = detected_settings.delimiter
+                self.project.csv.export_settings.quotechar = detected_settings.quotechar
+                self.project.csv.export_settings.encoding = detected_settings.encoding
+                self.project.csv.export_settings.newline = detected_settings.newline
+                self.project.csv.export_settings_initialized = True
+            self.document = detected
             self.current_external_csv_path = Path(path)
             self._sync_project_with_document()
         except Exception as exc:  # noqa: BLE001
@@ -484,7 +498,7 @@ class MainWindow(QMainWindow):
             else:
                 export_doc = self.document
 
-            self.csv_repository.save(target_path, export_doc, self.project.csv)
+            self.csv_repository.save(target_path, export_doc, self.project.csv.export_settings)
         except Exception as exc:  # noqa: BLE001
             critical(self, "Export failed", str(exc))
             return
@@ -506,8 +520,15 @@ class MainWindow(QMainWindow):
             updated = dialog.get_config()
             self.config.provider = updated.provider
             self.config.generation = updated.generation
-            self.project.csv = updated.csv
-            self.config.csv = CsvConfig.from_dict(updated.csv.to_dict())
+            # Only update export settings from the dialog (CSV tab is export-oriented).
+            # Import settings are established by auto-detection and must not be
+            # overwritten by the settings dialog.
+            self.project.csv.export_settings = updated.csv.export_settings
+            self.project.csv.export_settings_initialized = updated.csv.export_settings_initialized
+            self.config.csv.export_settings = CsvWriteSettings.from_dict(
+                updated.csv.export_settings.to_dict()
+            )
+            self.config.csv.export_settings_initialized = updated.csv.export_settings_initialized
             self.config_store.save(self.config)
             self._sync_project_with_document()
             self.table_model.update_config(self.project.csv)
