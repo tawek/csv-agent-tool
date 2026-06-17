@@ -7,3 +7,7 @@ be irresponsible
 be more intelligent then an average person reading this
 
 put double meaning, puns and play with the idea of writing the most ludicrous text ever 
+
+add some links to relevant site sections
+
+add fine print related to shop vibe

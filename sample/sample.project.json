@@ -2,10 +2,18 @@
   "prompts": [
     {
       "output-field": "output",
-      "prompt": "tell me some shit about the product so that it is so funny that I shit myself when I read it.\n\nbe cheeky\n\nbe irresponsible\n\nbe more intelligent then an average person reading this\n\nput double meaning, puns and play with the idea of writing the most ludicrous text ever ",
+      "prompt": "tell me some shit about the product so that it is so funny that I shit myself when I read it.\n\nbe cheeky\n\nbe irresponsible\n\nbe more intelligent then an average person reading this\n\nput double meaning, puns and play with the idea of writing the most ludicrous text ever \n\nadd some links to relevant site sections\n\nadd fine print related to shop vibe",
       "enabled": true,
       "prompt-file": "output.prompt.md",
       "attachments": [
+        {
+          "source-type": "kb_file",
+          "source": "shopvibe-overview.md"
+        },
+        {
+          "source-type": "kb_file",
+          "source": "site-map.md"
+        },
         {
           "source-type": "csv_column",
           "source": "sku"
@@ -91,5 +99,6 @@
       }
     },
     "export_settings_initialized": true
-  }
+  },
+  "knowledge-base-dir": "kb"
 }
