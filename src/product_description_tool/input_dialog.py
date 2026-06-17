@@ -2,8 +2,17 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtWidgets import QInputDialog
+from PySide6 import QtCore, QtWidgets
 
+__all__ = [
+    "set_test_mode",
+    "set_response",
+    "reset",
+    "get_text",
+    "get_int",
+    "get_double",
+    "get_item",
+]
 
 # ---------------------------------------------------------------------------
 # Configuration (set by tests or production code)
@@ -12,13 +21,9 @@ from PySide6.QtWidgets import QInputDialog
 _test_mode: bool = False
 _responses: dict[str, Callable[..., tuple] | tuple] = {}
 
-# Defaults: ("", False) — empty text + cancelled
-_DEFAULTS: dict[str, Callable[..., tuple]] = {
-    "getText": lambda *args, **kwargs: ("", False),
-    "getInt": lambda *args, **kwargs: (0, False),
-    "getDouble": lambda *args, **kwargs: (0.0, False),
-    "getItem": lambda *args, **kwargs: ("", False),
-}
+# ---------------------------------------------------------------------------
+# Public API — drop-in replacements for QInputDialog static methods
+# ---------------------------------------------------------------------------
 
 
 def set_test_mode(enabled: bool) -> None:
@@ -50,21 +55,31 @@ def reset() -> None:
 
 def _get_response(method: str) -> Callable[..., tuple] | tuple:
     """Return the configured response for *method*, falling back to defaults."""
-    return _responses.get(method, _DEFAULTS.get(method, lambda *a, **k: ("", False)))
+    return _responses.get(method, _defaults.get(method, _fallback))
 
 
-# ---------------------------------------------------------------------------
-# Public API — drop-in replacements for QInputDialog static methods
-# ---------------------------------------------------------------------------
+def _fallback(*args: object, **kwargs: object) -> tuple:
+    """Default fallback for unknown methods."""
+    return ("", False)
+
+
+_defaults: dict[str, tuple] = {
+    "getText": ("", False),
+    "getInt": (0, False),
+    "getDouble": (0.0, False),
+    "getItem": ("", False),
+}
 
 
 def get_text(
-    parent,
+    parent: QtWidgets.QWidget | None,
     title: str,
     label: str,
+    *,
+    echo: QtWidgets.QLineEdit.EchoMode | None = None,
     text: str = "",
-    flags: int = 0,
-    validator=None,
+    flags: QtCore.Qt.WindowFlags | None = None,
+    inputMethodHints: QtCore.Qt.InputMethodHint | None = None,
 ) -> tuple[str, bool]:
     """Show a text-input dialog.
 
@@ -73,20 +88,31 @@ def get_text(
     if _test_mode:
         response = _get_response("getText")
         if callable(response):
-            return response(parent, title, label, text, flags, validator)
+            return response(
+                parent, title, label, echo, text, flags, inputMethodHints
+            )
         return response
-    return QInputDialog.getText(parent, title, label, text, flags, validator)
+    kwargs: dict[str, object] = {}
+    if echo is not None:
+        kwargs["echo"] = echo
+    if text:
+        kwargs["text"] = text
+    if flags is not None:
+        kwargs["flags"] = flags
+    if inputMethodHints is not None:
+        kwargs["inputMethodHints"] = inputMethodHints
+    return QtWidgets.QInputDialog.getText(parent, title, label, **kwargs)
 
 
 def get_int(
-    parent,
+    parent: QtWidgets.QWidget | None,
     title: str,
     label: str,
     min: int = 0,
     max: int = 99,
     step: int = 1,
-    base: int = 10,
-    text: str = "",
+    value: int = 0,
+    flags: QtCore.Qt.WindowFlags | None = None,
 ) -> tuple[int, bool]:
     """Show an integer-input dialog.
 
@@ -95,19 +121,23 @@ def get_int(
     if _test_mode:
         response = _get_response("getInt")
         if callable(response):
-            return response(parent, title, label, min, max, step, base, text)
+            return response(parent, title, label, min, max, step, value, flags)
         return response
-    return QInputDialog.getInt(parent, title, label, min, max, step, base, text)
+    return QtWidgets.QInputDialog.getInt(
+        parent, title, label, min, max, step, value, flags
+    )
 
 
 def get_double(
-    parent,
+    parent: QtWidgets.QWidget | None,
     title: str,
     label: str,
+    value: float = 0,
     min: float = 0,
     max: float = 99,
     decimals: int = 1,
-    text: str = "",
+    step: float = 1,
+    flags: QtCore.Qt.WindowFlags | None = None,
 ) -> tuple[float, bool]:
     """Show a double-input dialog.
 
@@ -116,18 +146,23 @@ def get_double(
     if _test_mode:
         response = _get_response("getDouble")
         if callable(response):
-            return response(parent, title, label, min, max, decimals, text)
+            return response(
+                parent, title, label, value, min, max, decimals, step, flags
+            )
         return response
-    return QInputDialog.getDouble(parent, title, label, min, max, decimals, text)
+    return QtWidgets.QInputDialog.getDouble(
+        parent, title, label, value, min, max, decimals, step, flags
+    )
 
 
 def get_item(
-    parent,
+    parent: QtWidgets.QWidget | None,
     title: str,
     label: str,
     items: list[str],
-    current: int = 0,
+    currentItem: int = 0,
     editable: bool = True,
+    flags: QtCore.Qt.WindowFlags | None = None,
 ) -> tuple[str, bool]:
     """Show an item-selection dialog.
 
@@ -136,6 +171,10 @@ def get_item(
     if _test_mode:
         response = _get_response("getItem")
         if callable(response):
-            return response(parent, title, label, items, current, editable)
+            return response(
+                parent, title, label, items, currentItem, editable, flags
+            )
         return response
-    return QInputDialog.getItem(parent, title, label, items, current, editable)
+    return QtWidgets.QInputDialog.getItem(
+        parent, title, label, items, currentItem, editable, flags
+    )
