@@ -268,75 +268,60 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Actor:** User
 
-**Description:** The user controls the layout of the three panes (CSV Data, Prompts, Description) through minimize and maximize buttons. Each pane has a base state of collapsed (hidden) or expanded (visible). The pane layout derives a computed state—minimized, normalized (equalized), or maximized—based on the collapsed/expanded states of all three panes.
+**Description:** The user controls the layout of the three panes (CSV Data, Prompts, Description) through two header buttons on each pane: `+` to grow the pane and `-` to shrink it. Each pane can be in one of four layout states: maximized, normal, minimized, or temporary minimized.
 
 **Preconditions:** The application window is open and all three panes are present.
 
-### Base States
+### Panel States
 
-Each pane has a binary base state:
-- **Collapsed:** The pane body is hidden; only the header row is visible.
-- **Expanded:** The pane body is visible and takes up layout space.
+- **Maximized:** The pane occupies the available content area. A maximized pane cannot grow further.
+- **Normal:** The pane is visible at its regular shared size.
+- **Minimized:** The pane body is hidden and only the header row remains visible. A minimized pane cannot shrink further.
+- **Temporary minimized:** The pane is minimized automatically because another pane is maximized. It is not user-reachable via `-` and is restored to normal when the maximized pane returns to normal. It looks the same as minimized while active.
 
-### Computed Layout State
+### Header Controls
 
-The collective collapsed/expanded states of all three panes define the layout state:
+Each pane header contains exactly two buttons on the left:
+- `+` grows the pane.
+- `-` shrinks the pane.
 
-- **Minimized:** A panel is minimized when its header minimize button was used to collapse it (collapsed), while at least one other panel remains expanded. The minimized panel contributes only its header height to the layout.
-- **Maximized:** A panel is maximized when it is expanded and both other panels are collapsed. The maximized panel fills the available window space.
-- **Normalized (Equalized):** All three panels are expanded, or exactly two panels are expanded and one is collapsed. The layout distributes space among all expanded panels.
-
-### Minimize Button Behavior
-
-The minimize button is positioned to the right of the header label. Its icon reflects the action the button will perform when clicked:
-- `=` (equal sign): The panel will be normalized (equalized with others).
-- `-` (minus sign): The panel will be minimized (collapsed).
-- `+` (plus sign): The panel will be maximized (fill window).
-
-Clicking the minimize button:
-1. If the panel is collapsed → expand it (toggle expanded to True).
-2. If the panel is expanded → collapse it (toggle expanded to False).
-
-The button icon updates after every state change to reflect what the next click will do.
-
-### Maximize Button Behavior
-
-The maximize button is positioned immediately after the minimize button (both to the right of the header label). Its icon reflects the action the button will perform when clicked:
-- `=` (equal sign): The panel will be normalized (equalized with others).
-- `-` (minus sign): The panel will be minimized (collapsed).
-- `+` (plus sign): The panel will be maximized (fill window).
-
-Clicking the maximize button:
-1. If the panel is collapsed → expand it, then collapse both other panels (maximize this panel).
-2. If the panel is expanded and the layout is already maximized → normalize (expand both other panels, equalizing layout).
-3. If the panel is expanded and the layout is normalized → collapse both other panels (maximize this panel).
+Button enabled and disabled state communicates whether the pane can grow or shrink further:
+- `+` is disabled only when the pane is maximized.
+- `-` is disabled only when the pane is minimized.
 
 ### Trigger
 
-User clicks the minimize or maximize button in any pane header.
+User clicks the `+` or `-` button in any pane header.
 
 ### Flow
 
-1. Each pane header includes a minimize button (left of the header label) and a maximize button (right of the minimize button, also left of the header label).
-2. Both minimize and maximize buttons display an icon (`+`, `-`, or `=`) that indicates what will happen when the button is clicked, based on the current layout state.
-3. When the minimize button is clicked, the panel's collapsed state is toggled.
-4. When the maximize button is clicked:
-   - If the layout is not maximized, the clicked panel is maximized (other two panels are collapsed).
-   - If the layout is maximized for this panel, the layout returns to normalized state (all panels are expanded).
-   - If another panel is maximized, the current maximized panel is expanded and the clicked panel becomes maximized.
-5. After any button click, all three minimize and maximize buttons update their icons to reflect the impending action on the next click.
+1. Each pane header always shows exactly two buttons on the left: `+` and `-`.
+2. Clicking `+` grows the targeted pane by one step:
+   - minimized or temporary minimized → normal
+   - normal → maximized
+   - maximized → no change because `+` is disabled
+3. Clicking `-` shrinks the targeted pane by one step:
+   - maximized → normal
+   - normal → minimized
+   - minimized → no change because `-` is disabled
+4. Temporary minimized is never entered by clicking `-` directly.
+5. When a pane becomes maximized, every other pane that is currently normal becomes temporary minimized.
+6. When a pane becomes maximized, every other pane that is already minimized remains minimized.
+7. When a maximized pane is shrunk back to normal, all panes that were temporary minimized because of that maximized state are restored to normal.
+8. After each state change, all pane buttons refresh their enabled or disabled state to reflect whether each pane can grow or shrink further.
 
-**Postconditions:** The window layout reflects the chosen state (minimized, maximized, or normalized). No data or functionality is affected — this is purely a UI layout change.
+**Postconditions:** The window layout reflects the resulting pane states (maximized, normal, minimized, or temporary minimized). No data or functionality is affected — this is purely a UI layout change.
 
 **Error conditions:** No error conditions.
 
 **Invariants:**
-- The minimize/maximize toggle is purely cosmetic — it does not affect data, processing, or any other application functionality.
-- Each pane has both a minimize and a maximize button positioned to the left of the header label.
-- Both buttons use text symbols (`+`, `-`, `=`) that reflect the action they will perform on the next click. The minimize button only ever shows `-` (minimize) or `=` (normalize). The maximize button only ever shows `+` (maximize) or `=` (normalize).
-- The maximize state is shared across all three panes — only one pane can be maximized at a time.
-- A panel is maximized when it is expanded and both other panels are collapsed.
-- Normalizing the layout expands all three panels equally — no previous states are saved or restored.
+- Panel layout controls are purely cosmetic — they do not affect data, processing, or any other application functionality.
+- Each pane has exactly two header buttons on the left: `+` and `-`.
+- Button meaning is fixed by symbol: `+` always grows and `-` always shrinks.
+- Enabled and disabled button state, rather than changing symbols, communicates whether the pane can grow or shrink further.
+- Only one pane can be maximized at a time.
+- Temporary minimized is visually indistinguishable from minimized but remains a distinct internal state because it is restorable to normal when the active maximized pane is de-maximized.
+- Maximizing one pane temporarily minimizes only other panes that are currently normal; explicitly minimized panes remain minimized.
 
 ## Use Case 11: Preview a Single Row
 
