@@ -644,7 +644,7 @@ class SettingsDialog(QDialog):
         self._populate_fields_table()
         self.fields_table.resizeColumnsToContents()
         layout.addWidget(self.fields_table)
-        self.tabs.addTab(tab, "CSV")
+        self.tabs.addTab(tab, "Export CSV options")
 
     def _field_rows(self) -> list[tuple[str, FieldConfig]]:
         rows: list[tuple[str, FieldConfig]] = []

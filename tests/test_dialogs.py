@@ -144,6 +144,17 @@ def test_activity_dialog_force_close_closes_even_when_close_on_finish_is_off(qtb
     assert dialog.isVisible() is False
 
 
+def test_settings_dialog_csv_tab_label_is_export_csv_options(qtbot) -> None:
+    """The CSV settings tab is labelled 'Export CSV options' per
+    Use Case 1 (step 6)."""
+    dialog = SettingsDialog(AppConfig())
+    qtbot.addWidget(dialog)
+
+    # Tabs: Provider (0), Generation (1), Export CSV options (2)
+    csv_tab_index = 2
+    assert dialog.tabs.tabText(csv_tab_index) == "Export CSV options"
+
+
 def test_settings_dialog_uses_editable_model_combos(qtbot) -> None:
     config = AppConfig()
     config.provider.ollama.model = "llama3.2"

@@ -172,5 +172,25 @@ class ProjectRepository:
         )
         return project_path
 
+    def csv_import_settings_usable(self, path: str | Path) -> bool:
+        """Check if the raw project JSON provides usable import_settings.
+
+        Returns ``True`` if ``import_settings`` are present under the new
+        nested CSV config shape, or if the data uses the legacy flat shape
+        (which already populates ``import_settings`` compatibly via
+        ``CsvConfig.from_dict()``).
+
+        Returns ``False`` **only** when the new nested CSV config shape is
+        used but ``import_settings`` are truly absent.  This signals that
+        the backward-compatibility heuristic reopen fallback is needed.
+        """
+        project_path = normalize_project_path(path)
+        data = json.loads(project_path.read_text(encoding="utf-8"))
+        csv_data = data.get("csv", {})
+        has_nested = "import_settings" in csv_data or "export_settings" in csv_data
+        if not has_nested:
+            return True  # Legacy flat → import_settings populated compatibly
+        return "import_settings" in csv_data  # New shape: check presence
+
     def csv_path_for(self, path: str | Path) -> Path:
         return project_csv_path(path)

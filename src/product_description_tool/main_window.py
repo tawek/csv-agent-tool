@@ -375,9 +375,25 @@ class MainWindow(QMainWindow):
             return
         try:
             project_path = Path(path)
+
+            # Backward-compatibility: check if the raw project JSON lacks
+            # csv.import_settings under the new nested CSV config shape.
+            # This must be detected BEFORE CsvConfig.from_dict() normalises
+            # missing values to defaults.
+            needs_import_fallback = not self.project_repository.csv_import_settings_usable(
+                project_path
+            )
+
             project = self.project_repository.load(project_path)
             csv_path = self.project_repository.csv_path_for(project_path)
             if csv_path.exists():
+                if needs_import_fallback:
+                    # Backward-compatibility fallback: detect low-level CSV
+                    # settings from the sibling CSV instead of using missing
+                    # persisted import_settings.  The next save will persist
+                    # these detected settings so later reopens are deterministic.
+                    detected = self.csv_repository.detect_settings(csv_path)
+                    project.csv.import_settings = detected
                 document = self.csv_repository.load(csv_path, project.csv.import_settings)
             else:
                 document = self._empty_document_for_project(project)
@@ -413,7 +429,20 @@ class MainWindow(QMainWindow):
         target_path = self.project_repository.save(target_path, self.project)
         csv_path = self.project_repository.csv_path_for(target_path)
         try:
-            self.csv_repository.save(csv_path, self.document, self.project.csv.export_settings)
+            # Write the sibling project CSV using the import-derived low-level
+            # settings (delimiter, quotechar, encoding, newline) so the
+            # persisted working CSV remains in the same format as imported.
+            # Export-oriented settings (column order, field manipulation) are
+            # not applied to the project-working CSV; it is a persistence
+            # artifact, not an export artifact.
+            write_settings = CsvWriteSettings(
+                delimiter=self.project.csv.import_settings.delimiter,
+                quotechar=self.project.csv.import_settings.quotechar,
+                encoding=self.project.csv.import_settings.encoding,
+                newline=self.project.csv.import_settings.newline,
+                write_header=True,
+            )
+            self.csv_repository.save(csv_path, self.document, write_settings)
         except Exception as exc:  # noqa: BLE001
             critical(self, "Save failed", str(exc))
             return False

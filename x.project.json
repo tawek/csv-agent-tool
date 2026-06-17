@@ -2,47 +2,98 @@
   "prompts": [
     {
       "output-field": "sss",
-      "prompt": "Gen some shit",
+      "prompt": "Generate some shit",
       "enabled": true,
       "prompt-file": "sss.prompt.txt",
       "attachments": [
         {
           "source-type": "kb_file",
+          "source": "architecture/csv-import-heuristics-restart.md"
+        },
+        {
+          "source-type": "kb_file",
           "source": "architecture/kb-markitdown-conversion-design.md"
         },
         {
-          "source-type": "kb_file",
-          "source": "architecture/message-box-abstraction-design.md"
-        },
-        {
-          "source-type": "kb_file",
-          "source": "architecture/qt-dialog-test-safety-audit.md"
+          "source-type": "csv_column",
+          "source": "sku"
         },
         {
           "source-type": "csv_column",
-          "source": "sss"
+          "source": "name"
+        },
+        {
+          "source-type": "csv_column",
+          "source": "category"
+        },
+        {
+          "source-type": "csv_column",
+          "source": "price"
+        },
+        {
+          "source-type": "csv_column",
+          "source": "description"
         }
       ]
     }
   ],
   "csv": {
-    "export-path": "",
-    "export-only-visible": true,
-    "export-order": [
-      "sss"
-    ],
-    "fields": {
-      "sss": {
-        "label": "sss",
-        "show": true,
-        "strip_html_whitespace": false
+    "import_settings": {
+      "delimiter": ",",
+      "quotechar": "\"",
+      "encoding": "utf-8",
+      "newline": "\n"
+    },
+    "export_settings": {
+      "delimiter": ";",
+      "quotechar": "\"",
+      "encoding": "utf-8-sig",
+      "newline": "",
+      "write_header": true,
+      "export-path": "",
+      "export-only-visible": true,
+      "export-order": [
+        "sss",
+        "sku",
+        "name",
+        "category",
+        "price",
+        "description"
+      ],
+      "fields": {
+        "sss": {
+          "label": "sss",
+          "show": true,
+          "strip_html_whitespace": false
+        },
+        "sku": {
+          "label": "sku",
+          "show": true,
+          "strip_html_whitespace": false
+        },
+        "name": {
+          "label": "name",
+          "show": true,
+          "strip_html_whitespace": false
+        },
+        "category": {
+          "label": "category",
+          "show": true,
+          "strip_html_whitespace": false
+        },
+        "price": {
+          "label": "price",
+          "show": true,
+          "strip_html_whitespace": false
+        },
+        "description": {
+          "label": "description",
+          "show": true,
+          "strip_html_whitespace": false
+        }
       }
     },
-    "delimiter": ";",
-    "quotechar": "\"",
-    "encoding": "utf-8-sig",
-    "newline": "",
-    "write_header": true
+    "export_settings_initialized": true
   },
   "knowledge-base-dir": "docs"
 }

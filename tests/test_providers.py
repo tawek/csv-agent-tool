@@ -163,7 +163,7 @@ def test_openai_provider_uses_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["client_kwargs"]["base_url"] == "https://example.com/v1"
     import httpx
     assert isinstance(captured["client_kwargs"]["http_client"], httpx.Client)
-    assert captured["max_tokens"] == 111
+    assert captured["max_completion_tokens"] == 111
     assert captured["stream"] is True
     assert captured["extra_body"] == {"frequency_penalty": 0.2}
     assert chunks == ["<p>Out", "</p>"]

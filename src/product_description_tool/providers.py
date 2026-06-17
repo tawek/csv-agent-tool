@@ -229,7 +229,7 @@ class OpenAIProvider(ProviderClient):
                 ],
                 temperature=temperature,
                 top_p=top_p,
-                max_tokens=max_output_tokens,
+                max_completion_tokens=max_output_tokens,
                 stream=True,
                 extra_body=self.options or None,
             )

@@ -1808,3 +1808,219 @@ class TestCsvImportExportSettings:
         # Export values from the fake dialog (semicolons) must be preserved
         assert reloaded.csv.export_settings.delimiter == ";"
         assert reloaded.csv.export_settings.quotechar == '"'
+
+    # ── Sibling project CSV save/reopen (Use Cases 3, 4, 5, 6, 19) ──────────
+
+    def test_save_project_writes_sibling_csv_with_import_settings_not_export_settings(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """save_project writes the sibling CSV using import-derived low-level
+        settings, not export settings.  Export settings may diverge without
+        affecting the persisted working CSV format (Use Cases 4, 6)."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+
+        # Confirm import and export settings are the same after first import
+        assert window.project.csv.import_settings.delimiter == ";"
+        assert window.project.csv.export_settings.delimiter == ";"
+
+        # Diverge export settings
+        window.project.csv.export_settings.delimiter = "|"
+        window.project.csv.export_settings.quotechar = "'"
+
+        # Save project
+        project_path = tmp_path / "catalog.project.json"
+        file_dialog.set_response(
+            "getSaveFileName",
+            (str(project_path), "Project Files (*.project.json)"),
+        )
+        window.save_project(save_as=True)
+        file_dialog.reset()
+
+        # Read the sibling CSV directly
+        sibling_csv = project_path.with_name("catalog.csv")
+        assert sibling_csv.exists()
+        first_line = sibling_csv.read_text(encoding="utf-8").splitlines()[0]
+
+        # Must use ; delimiter (import-derived), not | (export)
+        assert ";" in first_line
+        assert "|" not in first_line
+
+        # Verify the export settings are still diverged in memory
+        assert window.project.csv.import_settings.delimiter == ";"
+        assert window.project.csv.export_settings.delimiter == "|"
+
+    def test_open_project_reopens_sibling_csv_with_import_settings(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """open_project reads the sibling CSV using persisted import-derived
+        settings, even when export settings have diverged.  The loaded data
+        must be intact (Use Cases 3, 19)."""
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        csv_path = _write_csv(tmp_path)
+        _import_window_csv(window, monkeypatch, csv_path)
+
+        # Diverge export settings
+        window.project.csv.export_settings.delimiter = "|"
+        window.project.csv.export_settings.quotechar = "'"
+
+        # Save project
+        project_path = tmp_path / "catalog.project.json"
+        file_dialog.set_response(
+            "getSaveFileName",
+            (str(project_path), "Project Files (*.project.json)"),
+        )
+        window.save_project(save_as=True)
+        file_dialog.reset()
+
+        # Reopen the project
+        file_dialog.set_response(
+            "getOpenFileName",
+            lambda *args: (str(project_path), "Project Files (*.project.json)"),
+        )
+        message_box.set_response("warning", QMessageBox.StandardButton.Discard)
+        window.open_project()
+        file_dialog.reset()
+        message_box.reset()
+
+        # Import settings must be the persisted import-derived values (not export)
+        assert window.project.csv.import_settings.delimiter == ";"
+        assert window.project.csv.import_settings.quotechar == '"'
+
+        # Data must be loaded correctly
+        assert len(window.document.rows) == 2
+        assert window.document.headers == ["sku", "description", "generated"]
+        assert window.document.rows[0]["sku"] == "A-1"
+        assert window.document.rows[1]["sku"] == "B-2"
+
+    def test_open_project_missing_import_settings_uses_fallback(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """When the raw project JSON uses the new nested CSV shape but omits
+        csv.import_settings, reopen falls back to heuristic CSV detection
+        from the sibling CSV file (Use Case 3 backward-compatibility fallback,
+        Architecture: csv-reopen-import-settings-strategy.md)."""
+        import json
+        from product_description_tool.project import (
+            Project,
+            ProjectPrompt,
+            ProjectRepository,
+        )
+
+        repo = ProjectRepository()
+        project = Project(
+            prompts=[ProjectPrompt(output_field="gen", prompt="Write about {{sku}}")],
+        )
+        project.csv.import_settings.delimiter = ";"
+        project.csv.export_settings.delimiter = "|"
+        project.csv.export_settings.quotechar = "'"
+
+        # Save to create a base project on disk
+        project_path = repo.save(tmp_path / "test.project.json", project)
+
+        # Rewrite JSON: nested CSV shape but WITHOUT import_settings
+        raw = json.loads(project_path.read_text(encoding="utf-8"))
+        raw["csv"] = {
+            "export_settings": raw["csv"]["export_settings"],
+        }
+        project_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+
+        # Create sibling CSV with ; delimiter
+        csv_path = tmp_path / "test.csv"
+        csv_path.write_text('sku;name\nA-1;Widget\nB-2;Gadget\n', encoding="utf-8")
+
+        # csv_import_settings_usable must return False
+        assert not repo.csv_import_settings_usable(project_path)
+
+        # Open the project
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        file_dialog.set_response(
+            "getOpenFileName",
+            lambda *args: (str(project_path), "Project Files (*.project.json)"),
+        )
+        message_box.set_response("warning", QMessageBox.StandardButton.Discard)
+        window.open_project()
+        file_dialog.reset()
+        message_box.reset()
+
+        # Import settings must have been detected heuristically from sibling CSV
+        assert window.project.csv.import_settings.delimiter == ";"
+        assert window.project.csv.import_settings.quotechar == '"'
+
+        # Data must be loaded correctly
+        assert len(window.document.rows) == 2
+        assert window.document.rows[0]["sku"] == "A-1"
+        assert window.document.rows[1]["sku"] == "B-2"
+
+    def test_self_healing_after_fallback_reopen(
+        self, qtbot, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """After a backward-compatibility fallback reopen, the next save
+        persists the detected import_settings so later reopens no longer
+        depend on heuristics (Use Case 3 self-healing invariant, Use Case 4)."""
+        import json
+        from product_description_tool.project import (
+            Project,
+            ProjectPrompt,
+            ProjectRepository,
+        )
+
+        repo = ProjectRepository()
+        project = Project(
+            prompts=[ProjectPrompt(output_field="gen", prompt="Write about {{sku}}")],
+        )
+        project.csv.import_settings.delimiter = ";"
+        project.csv.export_settings.delimiter = "|"
+        project.csv.export_settings.quotechar = "'"
+
+        project_path = repo.save(tmp_path / "test.project.json", project)
+
+        # Remove import_settings from JSON
+        raw = json.loads(project_path.read_text(encoding="utf-8"))
+        raw["csv"] = {
+            "export_settings": raw["csv"]["export_settings"],
+        }
+        project_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+
+        # Create sibling CSV
+        csv_path = tmp_path / "test.csv"
+        csv_path.write_text('sku;name\nA-1;Widget\nB-2;Gadget\n', encoding="utf-8")
+
+        # Open project via fallback
+        window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"))
+        qtbot.addWidget(window)
+        window.show()
+
+        file_dialog.set_response(
+            "getOpenFileName",
+            lambda *args: (str(project_path), "Project Files (*.project.json)"),
+        )
+        message_box.set_response("warning", QMessageBox.StandardButton.Discard)
+        window.open_project()
+        file_dialog.reset()
+        message_box.reset()
+
+        # Verify fallback was used
+        assert window.project.csv.import_settings.delimiter == ";"
+
+        # Save again — should persist the detected settings
+        window.save_project()
+
+        # Verify import_settings are now present in the JSON
+        raw_after = json.loads(project_path.read_text(encoding="utf-8"))
+        assert "import_settings" in raw_after["csv"]
+        assert raw_after["csv"]["import_settings"]["delimiter"] == ";"
+        assert raw_after["csv"]["import_settings"]["quotechar"] == '"'
+
+        # Verify csv_import_settings_usable now returns True for the healed file
+        assert repo.csv_import_settings_usable(project_path)

@@ -105,3 +105,97 @@ class TestKnowledgeBaseDir:
         saved_path = repository.save(tmp_path / "nokb.project.json", project)
         loaded = repository.load(saved_path)
         assert loaded.knowledge_base_dir is None
+
+
+class TestCsvImportSettingsUsable:
+    """Tests for ProjectRepository.csv_import_settings_usable().
+
+    This method determines whether backward-compatibility fallback is
+    needed during project reopen (Architecture:
+    csv-reopen-import-settings-strategy.md).
+    """
+
+    def test_new_shape_with_import_settings_returns_true(self, tmp_path: Path) -> None:
+        """Nested CSV shape with import_settings present → usable."""
+        import json
+        repo = ProjectRepository()
+        project = Project()
+        project.csv.import_settings.delimiter = ","
+        project.csv.export_settings.delimiter = ";"
+        saved_path = repo.save(tmp_path / "test.project.json", project)
+        assert repo.csv_import_settings_usable(saved_path) is True
+
+    def test_new_shape_without_import_settings_returns_false(self, tmp_path: Path) -> None:
+        """Nested CSV shape without import_settings → not usable (fallback needed)."""
+        import json
+        repo = ProjectRepository()
+        project = Project()
+        project.csv.export_settings.delimiter = ";"
+        saved_path = repo.save(tmp_path / "test.project.json", project)
+        # Rewrite JSON to remove import_settings from nested shape
+        raw = json.loads(saved_path.read_text(encoding="utf-8"))
+        raw["csv"] = {"export_settings": raw["csv"]["export_settings"]}
+        saved_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        assert repo.csv_import_settings_usable(saved_path) is False
+
+    def test_legacy_flat_shape_returns_true(self, tmp_path: Path) -> None:
+        """Legacy flat CSV config (no import/export keys) → usable (backward compat)."""
+        import json
+        repo = ProjectRepository()
+        # Write a project JSON with flat CSV structure (old format)
+        raw = {
+            "prompts": [],
+            "csv": {
+                "delimiter": ";",
+                "quotechar": '"',
+                "encoding": "utf-8-sig",
+                "newline": "",
+                "write_header": True,
+                "export-path": "",
+                "export-only-visible": True,
+                "export-order": [],
+                "fields": {},
+            },
+        }
+        path = tmp_path / "legacy.project.json"
+        path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        assert repo.csv_import_settings_usable(path) is True
+
+    def test_nested_with_all_settings_returns_true(self, tmp_path: Path) -> None:
+        """Nested CSV shape with both import and export settings → usable."""
+        import json
+        repo = ProjectRepository()
+        raw = {
+            "prompts": [],
+            "csv": {
+                "import_settings": {"delimiter": ",", "quotechar": '"', "encoding": "utf-8", "newline": "\n"},
+                "export_settings": {"delimiter": ";", "quotechar": "'", "encoding": "utf-8-sig", "newline": ""},
+                "export_settings_initialized": True,
+            },
+        }
+        path = tmp_path / "full.project.json"
+        path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        assert repo.csv_import_settings_usable(path) is True
+
+    def test_empty_csv_key_legacy_fallback(self, tmp_path: Path) -> None:
+        """Project JSON with empty csv {} → treated as legacy flat → usable."""
+        import json
+        repo = ProjectRepository()
+        raw = {
+            "prompts": [],
+            "csv": {},
+        }
+        path = tmp_path / "empty.project.json"
+        path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        assert repo.csv_import_settings_usable(path) is True
+
+    def test_no_csv_key_legacy_fallback(self, tmp_path: Path) -> None:
+        """Project JSON without csv key → treated as legacy flat → usable."""
+        import json
+        repo = ProjectRepository()
+        raw = {
+            "prompts": [],
+        }
+        path = tmp_path / "nocsv.project.json"
+        path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        assert repo.csv_import_settings_usable(path) is True

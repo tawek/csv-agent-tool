@@ -1,0 +1,10 @@
+# Action Register
+
+| ID | Source | Finding | Disposition | Owner | Target | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| ARC-1 | Architect | The prior export-settings-based reopen/save recommendation is withdrawn. The sibling project CSV must use the import-derived working CSV contract, not `project.csv.export_settings`. | fix now | Leader | current task | closed |
+| ARC-2 | Architect | `docs/specification.md` must be updated again before implementation because the current spec still treats the sibling project CSV as export-settings-controlled. Use Cases 1, 3, 4, 5, 6, and 19 must reflect that project save/reopen use the import-derived working CSV format, while project settings remain export-only, the settings UI must say **Export CSV options**, and missing `csv.import_settings` heuristic reopen is fallback-only backward compatibility rather than the normal contract. | fix now | Leader | current task | closed |
+| ARC-3 | Architect | `MainWindow.save_project()` is architecturally inconsistent with the required behavior because it writes the sibling project CSV using `project.csv.export_settings`. Implementation must move sibling project CSV writes to the persisted import-derived contract while keeping explicit export on `project.csv.export_settings`. | fix now | Product Developer | current task | closed |
+| ARC-4 | Architect | Backward-compatibility reopen heuristics are allowed only when raw persisted project data truly lacks `csv.import_settings` under the new nested CSV shape. Detection must be shape-based before `CsvConfig.from_dict()` normalization; default-value comparisons are unsafe. | fix now | Product Developer | current task | closed |
+| QA-1 | QA Engineer | Regression coverage required for sibling project CSV save/reopen, settings UI wording, backward-compatibility fallback, and self-healing persistence. | fix now | QA Engineer | current task | closed |
+| ARC-5 | Architect | Add targeted regression coverage for the nested-shape missing-`csv.import_settings` reopen fallback and the export-only settings wording so the approved contract stays protected. | fix now | QA Engineer | current task | closed |
