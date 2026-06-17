@@ -630,7 +630,7 @@ User clicks the `+` or `-` button in any pane header.
 1. The main application UI exposes a single **Knowledge Base** entry for knowledge-base access; separate direct knowledge-base actions are not required in the menu structure.
 2. Selecting that entry opens a separate knowledge-base management window for the current project.
 3. The window shows the currently configured project-scoped knowledge-base directory, if any.
-4. The user may set or change the knowledge-base directory by browsing for a folder.
+4. The user may set or change the knowledge-base directory by browsing for a folder. The folder-selection dialog must open successfully on supported PySide6 builds and must not fail because of an incompatible dialog-options argument type.
 5. The user may clear the configured knowledge-base directory.
 6. The window provides a file and directory explorer rooted at the configured knowledge-base directory.
 7. If no knowledge-base directory is configured, file-browsing and file-management actions that require a root directory are unavailable until the user sets one.
