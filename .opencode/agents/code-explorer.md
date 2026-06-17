@@ -1,6 +1,6 @@
 ---
 description: Code Explorer for Product Description Tool — navigates the codebase, locates components, answers structure questions, and maps relationships between modules. Read-only agent.
-model: opencode/deepseek-v4-flash-free
+model: llamacpp/qwen3.6-35b-a3b
 permission:
   read: allow
   edit: deny
