@@ -5,6 +5,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from product_description_tool.kb_conversion import ALL_KB_EXTENSIONS
+
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QCloseEvent, QPainter, QTextDocument
 from PySide6.QtWidgets import (
@@ -1307,7 +1309,7 @@ class AttachmentManager(QDialog):
             return "Path escapes KB directory"
         if not candidate.exists():
             return "File not found"
-        if candidate.suffix.lower() not in {".md", ".markdown", ".csv"}:
+        if candidate.suffix.lower() not in ALL_KB_EXTENSIONS:
             return "Unsupported type"
         return "Available"
 

@@ -717,7 +717,7 @@ class TestAttachmentManagerStatus:
 
         kb_dir = tmp_path / "kb"
         kb_dir.mkdir()
-        (kb_dir / "data.txt").write_text("data", encoding="utf-8")
+        (kb_dir / "script.py").write_text("x=1", encoding="utf-8")
         dialog = AttachmentManager(
             prompt_output_field="desc",
             attachments=[],
@@ -726,7 +726,7 @@ class TestAttachmentManagerStatus:
             csv_columns=[],
         )
         qtbot.addWidget(dialog)
-        assert "Unsupported type" in dialog._resolve_kb_file_status("data.txt")
+        assert "Unsupported type" in dialog._resolve_kb_file_status("script.py")
 
     def test_column_status_available(self, qtbot) -> None:
         """An existing column reports 'Available'."""

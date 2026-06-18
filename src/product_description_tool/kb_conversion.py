@@ -22,6 +22,8 @@ CONVERTIBLE_EXTENSIONS: frozenset[str] = frozenset({
     ".xlsx", ".xls",
     ".html", ".htm",
     ".epub",
+    ".odt",
+    ".ods",
 })
 
 # Complete set of extensions usable in KB operations (prompt references,
@@ -145,6 +147,45 @@ class KnowledgeBaseContentService:
         return self._markitdown_available
 
     @staticmethod
+    def _convert_odf(file_path: Path) -> str:
+        """Convert an ODF file (.odt, .ods) to Markdown text using odfpy."""
+        from odf.opendocument import load
+        from odf.text import P as OdfParagraph
+        from odf.table import Table, TableRow, TableCell
+
+        doc = load(str(file_path))
+
+        parts: list[str] = []
+
+        def _collect_text(element) -> str:
+            texts: list[str] = []
+            if element.nodeType == element.TEXT_NODE:
+                texts.append(element.data or "")
+            for child in element.childNodes:
+                texts.append(_collect_text(child))
+            return "".join(texts)
+
+        suffix = file_path.suffix.lower()
+
+        if suffix == ".ods":
+            for table in doc.spreadsheet.getElementsByType(Table):
+                rows: list[str] = []
+                for row in table.getElementsByType(TableRow):
+                    cells: list[str] = []
+                    for cell in row.getElementsByType(TableCell):
+                        cells.append(_collect_text(cell).strip())
+                    rows.append(" | ".join(cells))
+                parts.append("\n".join(rows))
+                parts.append("")
+        else:
+            for elem in doc.text.childNodes:
+                text = _collect_text(elem).strip()
+                if text:
+                    parts.append(text)
+
+        return "\n".join(parts).strip()
+
+    @staticmethod
     def classify_suffix(suffix: str) -> str:
         """Classify a file suffix as ``'direct_read'``, ``'convertible'``, or ``'unsupported'``."""
         s = suffix.lower()
@@ -237,24 +278,27 @@ class KnowledgeBaseContentService:
             if cached is not None:
                 return cached
 
-            # Check MarkItDown availability
-            if not self._check_markitdown():
-                raise MarkItDownUnavailableError(
-                    f"Cannot convert '{resolved_path.name}': "
-                    "MarkItDown is not available."
-                )
+            if suffix in (".odt", ".ods"):
+                markdown_content = self._convert_odf(resolved_path)
+            else:
+                # Check MarkItDown availability
+                if not self._check_markitdown():
+                    raise MarkItDownUnavailableError(
+                        f"Cannot convert '{resolved_path.name}': "
+                        "MarkItDown is not available."
+                    )
 
-            # Convert
-            try:
-                from markitdown import MarkItDown
+                # Convert
+                try:
+                    from markitdown import MarkItDown
 
-                converter = MarkItDown()
-                result = converter.convert(str(resolved_path))
-                markdown_content = result.text_content
-            except Exception as exc:
-                raise ConversionFailedError(
-                    f"Failed to convert '{resolved_path.name}': {exc}"
-                ) from exc
+                    converter = MarkItDown()
+                    result = converter.convert(str(resolved_path))
+                    markdown_content = result.text_content
+                except Exception as exc:
+                    raise ConversionFailedError(
+                        f"Failed to convert '{resolved_path.name}': {exc}"
+                    ) from exc
 
             # Cache and return
             self._cache.store(resolved_path, markdown_content)
