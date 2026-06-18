@@ -353,7 +353,7 @@ class RecentProjectsStore:
             return []
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            return [Path(p) for p in data.get("recent", [])]
+            return [Path(p).resolve() for p in data.get("recent", [])]
         except (json.JSONDecodeError, OSError):
             return []
 
@@ -361,7 +361,7 @@ class RecentProjectsStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
             json.dumps(
-                {"recent": [str(p) for p in paths]},
+                {"recent": [str(p.resolve()) for p in paths]},
                 indent=2,
                 ensure_ascii=True,
             ),
