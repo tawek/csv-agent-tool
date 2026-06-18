@@ -335,3 +335,48 @@ class ConfigStore:
             json.dumps(persisted, indent=2, ensure_ascii=True),
             encoding="utf-8",
         )
+
+
+MAX_RECENT = 10
+
+
+class RecentProjectsStore:
+    def __init__(self, path: Path | None = None) -> None:
+        if path is not None:
+            self.path = path
+        else:
+            base_dir = Path(user_config_dir("product-description-tool", "Codex"))
+            self.path = base_dir / "recent.json"
+
+    def load(self) -> list[Path]:
+        if not self.path.exists():
+            return []
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            return [Path(p) for p in data.get("recent", [])]
+        except (json.JSONDecodeError, OSError):
+            return []
+
+    def save(self, paths: list[Path]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(
+            json.dumps(
+                {"recent": [str(p) for p in paths]},
+                indent=2,
+                ensure_ascii=True,
+            ),
+            encoding="utf-8",
+        )
+
+    def add(self, path: Path) -> None:
+        resolved = path.resolve()
+        paths = self.load()
+        paths = [p for p in paths if p.resolve() != resolved]
+        paths.insert(0, resolved)
+        self.save(paths[:MAX_RECENT])
+
+    def remove(self, path: Path) -> None:
+        resolved = path.resolve()
+        paths = self.load()
+        paths = [p for p in paths if p.resolve() != resolved]
+        self.save(paths)

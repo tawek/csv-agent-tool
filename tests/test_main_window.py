@@ -5,7 +5,7 @@ from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import QGroupBox, QMessageBox
 
 from product_description_tool import message_box, file_dialog, input_dialog
-from product_description_tool.config import AppConfig, ConfigStore, FieldConfig
+from product_description_tool.config import AppConfig, ConfigStore, FieldConfig, RecentProjectsStore
 from product_description_tool.generation import PromptPayload, USER_PROMPT
 from product_description_tool.collapsible_panel import PanelState
 from product_description_tool.main_window import MainWindow
@@ -490,6 +490,88 @@ def test_menu_actions_have_requested_shortcuts(qtbot, tmp_path: Path) -> None:
     assert window.process_current_action.shortcut().toString() == "Ctrl+Enter"
     assert window.edit_original_action.shortcut().toString() == "Ctrl+O"
     assert window.edit_result_action.shortcut().toString() == "Ctrl+R"
+
+
+def _recent_store(tmp_path: Path) -> RecentProjectsStore:
+    return RecentProjectsStore(path=tmp_path / "recent.json")
+
+
+def test_open_recent_submenu_shows_recent_projects(qtbot, tmp_path: Path) -> None:
+    recent_store = _recent_store(tmp_path)
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"), recent_store=recent_store)
+    qtbot.addWidget(window)
+    window.show()
+
+    p1 = tmp_path / "alpha.project.json"
+    p2 = tmp_path / "beta.project.json"
+    for p in (p1, p2):
+        p.write_text("{}", encoding="utf-8")
+    recent_store.add(p1)
+    recent_store.add(p2)
+    window._build_recent_menu()
+
+    menu = window.open_recent_menu
+    assert menu is not None
+    actions = menu.actions()
+    assert len(actions) == 2
+    assert actions[0].text() == "beta"
+    assert actions[1].text() == "alpha"
+
+    assert actions[0].data() == str(p2)
+    assert actions[1].data() == str(p1)
+
+
+def test_open_recent_removes_missing_entry(qtbot, tmp_path: Path) -> None:
+    recent_store = _recent_store(tmp_path)
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"), recent_store=recent_store)
+    qtbot.addWidget(window)
+    window.show()
+
+    missing = tmp_path / "missing.project.json"
+    recent_store.add(missing)
+    window._build_recent_menu()
+
+    assert len(window.open_recent_menu.actions()) == 1
+
+    action = window.open_recent_menu.actions()[0]
+    action.triggered.emit()
+
+    assert not recent_store.load()
+    assert len(window.open_recent_menu.actions()) == 1
+    assert not window.open_recent_menu.actions()[0].isEnabled()
+
+
+def test_save_project_adds_to_recent(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from product_description_tool import file_dialog
+    recent_store = _recent_store(tmp_path)
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"), recent_store=recent_store)
+    qtbot.addWidget(window)
+    window.show()
+
+    project_path = tmp_path / "catalog.project.json"
+    file_dialog.set_response(
+        "getSaveFileName",
+        (str(project_path), "Project Files (*.project.json)"),
+    )
+    assert window.save_project(save_as=True)
+    file_dialog.reset()
+
+    recent = recent_store.load()
+    assert len(recent) == 1
+    assert recent[0].resolve() == project_path.resolve()
+
+
+def test_open_recent_shows_empty_when_no_projects(qtbot, tmp_path: Path) -> None:
+    recent_store = _recent_store(tmp_path)
+    window = MainWindow(config_store=ConfigStore(tmp_path / "config.json"), recent_store=recent_store)
+    qtbot.addWidget(window)
+    window.show()
+    window._build_recent_menu()
+
+    actions = window.open_recent_menu.actions()
+    assert len(actions) == 1
+    assert "(no recent projects)" in actions[0].text()
+    assert not actions[0].isEnabled()
 
 
 def test_cancel_batch_processing_stops_before_all_rows_finish(qtbot, tmp_path: Path, monkeypatch) -> None:

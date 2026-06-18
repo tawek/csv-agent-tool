@@ -631,6 +631,35 @@ User clicks the `+` or `-` button in any pane header.
 - Existing inline `{{column}}` and `{{@path}}` placeholder behavior remains backward compatible and does not require migration into attachment metadata.
 - Missing `csv.import_settings` fallback is a backward-compatibility bridge for nested-shape project payloads only; it is not the primary reopen contract for sibling project CSV data.
 
+## Use Case 30: Open a Recent Project
+
+**Actor:** User
+
+**Description:** The user opens a recently opened project from an "Open Recent" submenu, which lists the last 10 project files.
+
+**Trigger:** User selects **File > Open Recent** and chooses a project from the submenu.
+
+**Preconditions:** At least one project was previously opened or saved.
+
+**Flow:**
+
+1. The "Open Recent" submenu is populated with project paths from `recent.json` in the user config directory.
+2. The submenu displays the file name (stem) of each recent project, ordered by most recently opened first.
+3. The user selects a recent project from the submenu.
+4. The application checks whether the selected project file still exists on disk:
+   - If the file exists, the project is opened using the same `open_project` flow: unsaved changes prompt, project load, CSV load.
+   - If the file no longer exists, it is removed from the recent list, the submenu is rebuilt, and the user is informed with a status-bar message.
+5. After a successful save (Save or Save As) or open, the project path is added to the top of the recent list. If already present, it is moved to the top. If the list exceeds 10 entries, the oldest entry is removed.
+6. The recent list is persisted to `recent.json` immediately after any add or remove operation.
+
+**Postconditions:** The selected recent project is now the current session, or the missing entry is cleaned from the list.
+
+**Invariants:**
+- The recent list is stored in `<user_config_dir>/product-description-tool/recent.json`.
+- The list is capped at 10 entries.
+- Entries are stored as absolute file paths to `.project.json` files.
+- Missing files are silently cleaned when selected, not when the submenu is built.
+
 ## Use Case 20: Exit the Application
 
 **Actor:** User

@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from product_description_tool import message_box, file_dialog, input_dialog
 from product_description_tool.collapsible_panel import CollapsiblePanel, PanelState
-from product_description_tool.config import AppConfig, ConfigStore, CsvConfig, CsvWriteSettings, FieldConfig
+from product_description_tool.config import AppConfig, ConfigStore, CsvConfig, CsvWriteSettings, FieldConfig, RecentProjectsStore
 from product_description_tool.csv_repository import CsvDocument, CsvRepository
 from product_description_tool.dialogs import (
     ActivityDialog,
@@ -55,7 +55,7 @@ from product_description_tool.worker import GenerationWorker
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, *, config_store: ConfigStore) -> None:
+    def __init__(self, *, config_store: ConfigStore, recent_store: RecentProjectsStore | None = None) -> None:
         super().__init__()
         self.setWindowTitle("Product Description Tool")
         self.resize(1500, 960)
@@ -86,6 +86,7 @@ class MainWindow(QMainWindow):
         self.filter_patterns: dict[str, str] = {}
         self._updating_prompt_ui = False
         self._kb_manager: KnowledgeBaseManager | None = None
+        self._recent_store = recent_store or RecentProjectsStore()
 
         self.table_model = CsvTableModel()
         self.proxy_model = WildcardFilterProxyModel()
@@ -291,15 +292,19 @@ class MainWindow(QMainWindow):
         )
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
+        self.open_recent_menu = file_menu.addMenu("Open Recent")
+        self._build_recent_menu()
+        file_menu.addSeparator()
         file_menu.addActions(
             [
                 self.new_project_action,
                 self.open_project_action,
                 self.save_project_action,
                 self.save_project_as_action,
-                exit_action,
             ]
         )
+        file_menu.addSeparator()
+        file_menu.addAction(exit_action)
 
         csv_menu = menu_bar.addMenu("CSV")
         self.load_csv_action = QAction("Import", self)
@@ -339,6 +344,69 @@ class MainWindow(QMainWindow):
         process_menu.addActions(
             [self.process_all_action, self.process_visible_action, self.process_current_action]
         )
+
+    def _build_recent_menu(self) -> None:
+        self.open_recent_menu.clear()
+        recent = self._recent_store.load()
+        if not recent:
+            noop = self.open_recent_menu.addAction("(no recent projects)")
+            noop.setEnabled(False)
+            return
+        for path in recent:
+            name = path.stem.removesuffix(".project").removesuffix(".project")
+            action = self.open_recent_menu.addAction(name)
+            action.setToolTip(str(path))
+            action.setData(str(path))
+            action.triggered.connect(self._open_recent_project)
+
+    def _open_recent_project(self) -> None:
+        action = self.sender()
+        if not action:
+            return
+        path_str = action.data()
+        if not path_str:
+            return
+        path = Path(path_str)
+        if not path.exists():
+            self._recent_store.remove(path)
+            self._build_recent_menu()
+            self.status.showMessage(f"Removed missing recent project: {path.name}")
+            return
+        if not self._maybe_save_project():
+            return
+        self._close_kb_manager()
+        try:
+            project_path = Path(path)
+            needs_import_fallback = not self.project_repository.csv_import_settings_usable(
+                project_path
+            )
+            project = self.project_repository.load(project_path)
+            csv_path = self.project_repository.csv_path_for(project_path)
+            if csv_path.exists():
+                if needs_import_fallback:
+                    detected = self.csv_repository.detect_settings(csv_path)
+                    project.csv.import_settings = detected
+                document = self.csv_repository.load(csv_path, project.csv.import_settings)
+            else:
+                document = self._empty_document_for_project(project)
+            self.project = project
+            self.document = document
+            self.project_path = project_path
+            self.current_external_csv_path = None
+            self.filter_patterns = {}
+            self._sync_project_with_document()
+        except Exception as exc:
+            critical(self, "Open failed", str(exc))
+            return
+        self._recent_store.add(self.project_path)
+        self._build_recent_menu()
+        self._refresh_prompt_controls()
+        self._refresh_table_from_document()
+        self._update_preview_field_selectors(preserve_selection=False)
+        self._update_interactive_state()
+        self._set_project_modified(False)
+        self._update_kb_indicator()
+        self.status.showMessage(f"Opened project {self.project_path}")
 
     def _default_project(self) -> Project:
         return Project(csv=CsvConfig.from_dict(self.config.csv.to_dict()))
@@ -406,6 +474,8 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             critical(self, "Open failed", str(exc))
             return
+        self._recent_store.add(self.project_path)
+        self._build_recent_menu()
         self._refresh_prompt_controls()
         self._refresh_table_from_document()
         self._update_preview_field_selectors(preserve_selection=False)
@@ -447,6 +517,8 @@ class MainWindow(QMainWindow):
             critical(self, "Save failed", str(exc))
             return False
         self.project_path = target_path
+        self._recent_store.add(self.project_path)
+        self._build_recent_menu()
         self.config.csv = CsvConfig.from_dict(self.project.csv.to_dict())
         self._set_project_modified(False)
         self.status.showMessage(f"Saved project to {target_path}")

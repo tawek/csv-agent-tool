@@ -8,7 +8,7 @@ values according to the spec defaults:
 
 from pathlib import Path
 
-from product_description_tool.config import AppConfig, ConfigStore, CsvConfig, CsvReadSettings, CsvWriteSettings
+from product_description_tool.config import AppConfig, ConfigStore, CsvConfig, CsvReadSettings, CsvWriteSettings, RecentProjectsStore, MAX_RECENT
 
 
 class TestCsvConfigDefaults:
@@ -337,3 +337,58 @@ class TestConfigStoreRoundTrip:
         # Legacy fallback: no csv key → {} → CsvConfig.from_dict({}) → legacy path
         assert loaded.csv.export_settings_initialized is True
         assert loaded.csv.export_settings.delimiter == ";"
+
+
+class TestRecentProjectsStore:
+    """RecentProjectsStore persistence and capping behaviour."""
+
+    def test_load_empty_when_no_file(self, tmp_path: Path) -> None:
+        store = RecentProjectsStore()
+        store.path = tmp_path / "recent.json"
+        assert store.load() == []
+
+    def test_save_and_load_round_trip(self, tmp_path: Path) -> None:
+        store = RecentProjectsStore()
+        store.path = tmp_path / "recent.json"
+        paths = [tmp_path / f"p{i}.project.json" for i in range(3)]
+        store.save(paths)
+        loaded = store.load()
+        assert loaded == paths
+
+    def test_add_inserts_at_top_and_deduplicates(self, tmp_path: Path) -> None:
+        store = RecentProjectsStore()
+        store.path = tmp_path / "recent.json"
+        a = tmp_path / "a.project.json"
+        b = tmp_path / "b.project.json"
+        store.add(a)
+        store.add(b)
+        store.add(a)  # should move a to top, not duplicate
+        loaded = store.load()
+        assert loaded == [a, b]
+
+    def test_add_respects_max(self, tmp_path: Path) -> None:
+        store = RecentProjectsStore()
+        store.path = tmp_path / "recent.json"
+        paths = [tmp_path / f"p{i}.project.json" for i in range(MAX_RECENT + 5)]
+        for p in paths:
+            store.add(p)
+        loaded = store.load()
+        assert len(loaded) == MAX_RECENT
+        assert loaded[0] == paths[-1]  # newest first
+
+    def test_remove_removes_entry(self, tmp_path: Path) -> None:
+        store = RecentProjectsStore()
+        store.path = tmp_path / "recent.json"
+        a = tmp_path / "a.project.json"
+        b = tmp_path / "b.project.json"
+        store.add(a)
+        store.add(b)
+        store.remove(a)
+        loaded = store.load()
+        assert loaded == [b]
+
+    def test_load_corrupt_json_returns_empty(self, tmp_path: Path) -> None:
+        store = RecentProjectsStore()
+        store.path = tmp_path / "recent.json"
+        store.path.write_text("corrupt", encoding="utf-8")
+        assert store.load() == []
