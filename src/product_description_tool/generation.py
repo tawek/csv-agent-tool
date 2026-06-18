@@ -6,12 +6,11 @@ from pathlib import Path
 from typing import Callable
 
 from product_description_tool.config import AppConfig
+from product_description_tool.kb_conversion import ConversionFailedError, MarkItDownUnavailableError
 from product_description_tool.project import PromptAttachment
 from product_description_tool.kb_conversion import KnowledgeBaseContentService
 from product_description_tool.prompt_renderer import (
-    CONVERTIBLE_EXTENSIONS,
     KB_REF_PREFIX,
-    SUPPORTED_KB_EXTENSIONS,
     PromptRenderer,
 )
 from product_description_tool.providers import ProviderClient, build_provider
@@ -121,28 +120,26 @@ class GenerationService:
                     raise ValueError(
                         f"Attachment #{idx + 1} ('{att.source}'): not a file."
                     )
-                suffix = candidate.suffix.lower()
-                if suffix not in SUPPORTED_KB_EXTENSIONS:
-                    supported = ", ".join(sorted(SUPPORTED_KB_EXTENSIONS))
+                svc = KnowledgeBaseContentService()
+                err_msg = svc.validate_supported(candidate)
+                if err_msg is not None:
                     raise ValueError(
-                        f"Attachment #{idx + 1} ('{att.source}'): "
-                        f"unsupported file type '{suffix}' "
-                        f"(supported: {supported})."
+                        f"Attachment #{idx + 1} ('{att.source}'): {err_msg}"
                     )
-                if suffix in CONVERTIBLE_EXTENSIONS:
-                    svc = KnowledgeBaseContentService()
-                    err_msg = svc.validate_supported(candidate)
-                    if err_msg is not None:
-                        raise ValueError(
-                            f"Attachment #{idx + 1} ('{att.source}'): {err_msg}"
-                        )
-                else:
-                    try:
-                        candidate.read_bytes()
-                    except (OSError, PermissionError):
-                        raise ValueError(
-                            f"Attachment #{idx + 1} ('{att.source}'): file is not readable."
-                        ) from None
+                try:
+                    svc.load_markdown(candidate, kb_path)
+                except MarkItDownUnavailableError as exc:
+                    raise ValueError(
+                        f"Attachment #{idx + 1} ('{att.source}'): {exc}"
+                    ) from exc
+                except ConversionFailedError as exc:
+                    raise ValueError(
+                        f"Attachment #{idx + 1} ('{att.source}'): {exc}"
+                    ) from exc
+                except (OSError, PermissionError):
+                    raise ValueError(
+                        f"Attachment #{idx + 1} ('{att.source}'): file is not readable."
+                    ) from None
             else:
                 raise ValueError(
                     f"Attachment #{idx + 1}: unknown source type "
@@ -185,12 +182,8 @@ class GenerationService:
                     candidate = (kb_path / att.source).resolve()
                     try:
                         candidate.relative_to(kb_path)
-                        suffix = candidate.suffix.lower()
-                        if suffix in CONVERTIBLE_EXTENSIONS:
-                            svc = KnowledgeBaseContentService()
-                            content = svc.load_markdown(candidate, kb_path)
-                        else:
-                            content = candidate.read_text(encoding="utf-8")
+                        svc = KnowledgeBaseContentService()
+                        content = svc.load_markdown(candidate, kb_path)
                     except (OSError, PermissionError, ValueError):
                         content = ""
                 parts.append(ATTACHMENT_HEADER_TEMPLATE.format(

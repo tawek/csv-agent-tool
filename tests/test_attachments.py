@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import Qt
 
 from product_description_tool.generation import GenerationService
 from product_description_tool.project import (
@@ -96,13 +97,13 @@ class TestValidateAttachments:
                 attachments, headers=["sku"], knowledge_base_dir=str(kb_dir),
             )
 
-    def test_kb_file_unsupported_type(self, tmp_path: Path) -> None:
-        """A KB-file attachment with an unsupported extension raises ValueError."""
+    def test_kb_file_unconvertible_type(self, tmp_path: Path) -> None:
+        """A KB-file attachment that cannot be converted raises ValueError."""
         kb_dir = tmp_path / "kb"
         kb_dir.mkdir()
-        (kb_dir / "data.py").write_text("x = 1", encoding="utf-8")
-        attachments = [PromptAttachment(source_type="kb_file", source="data.py")]
-        with pytest.raises(ValueError, match="unsupported file type"):
+        (kb_dir / "binary.exe").write_bytes(b"MZ\x90")
+        attachments = [PromptAttachment(source_type="kb_file", source="binary.exe")]
+        with pytest.raises(ValueError, match="Failed to convert"):
             GenerationService.validate_attachments(
                 attachments, headers=["sku"], knowledge_base_dir=str(kb_dir),
             )
@@ -711,13 +712,13 @@ class TestAttachmentManagerStatus:
         qtbot.addWidget(dialog)
         assert "File not found" in dialog._resolve_kb_file_status("missing.md")
 
-    def test_kb_status_unsupported_type(self, tmp_path: Path, qtbot) -> None:
-        """An unsupported file type reports 'Unsupported type'."""
+    def test_kb_status_convertible_file_is_available(self, tmp_path: Path, qtbot) -> None:
+        """A non-direct KB file reports available when conversion is possible."""
         from product_description_tool.dialogs import AttachmentManager
 
         kb_dir = tmp_path / "kb"
         kb_dir.mkdir()
-        (kb_dir / "script.py").write_text("x=1", encoding="utf-8")
+        (kb_dir / "page.html").write_text("<p>x</p>", encoding="utf-8")
         dialog = AttachmentManager(
             prompt_output_field="desc",
             attachments=[],
@@ -726,7 +727,7 @@ class TestAttachmentManagerStatus:
             csv_columns=[],
         )
         qtbot.addWidget(dialog)
-        assert "Unsupported type" in dialog._resolve_kb_file_status("script.py")
+        assert dialog._resolve_kb_file_status("page.html") == "Available"
 
     def test_column_status_available(self, qtbot) -> None:
         """An existing column reports 'Available'."""
@@ -957,6 +958,41 @@ class TestAttachmentManagerDialogIntegration:
         )
         qtbot.addWidget(dialog)
         assert not dialog.add_column_button.isEnabled()
+
+
+class TestAddKbAttachmentsDialog:
+    def test_dialog_shows_nested_kb_tree(self, qtbot) -> None:
+        from product_description_tool.dialogs import AddKbAttachmentsDialog
+
+        dialog = AddKbAttachmentsDialog(
+            kb_files=["guide.md", "nested/deep/manual.pdf"],
+            existing_sources=set(),
+        )
+        qtbot.addWidget(dialog)
+
+        assert dialog.tree_widget.topLevelItemCount() == 2
+        nested = dialog.tree_widget.topLevelItem(1)
+        assert nested.text(0) == "nested"
+        assert nested.child(0).text(0) == "deep"
+        assert nested.child(0).child(0).text(0) == "manual.pdf"
+
+    def test_dialog_returns_selected_non_direct_file(self, qtbot) -> None:
+        from product_description_tool.dialogs import AddKbAttachmentsDialog
+
+        dialog = AddKbAttachmentsDialog(
+            kb_files=["nested/deep/manual.pdf"],
+            existing_sources=set(),
+        )
+        qtbot.addWidget(dialog)
+
+        nested = dialog.tree_widget.topLevelItem(0)
+        deep = nested.child(0)
+        manual = deep.child(0)
+        manual.setCheckState(0, Qt.CheckState.Checked)
+
+        dialog._confirm()
+
+        assert dialog.selected_sources() == ["nested/deep/manual.pdf"]
 
 
 # =========================================================================

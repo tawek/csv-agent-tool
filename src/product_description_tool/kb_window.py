@@ -18,8 +18,8 @@ from PySide6.QtWidgets import (
 
 from product_description_tool import message_box, input_dialog, file_dialog
 from product_description_tool.kb_conversion import (
-    CONVERTIBLE_EXTENSIONS,
     ConversionFailedError,
+    DIRECT_READ_EXTENSIONS,
     KnowledgeBaseContentService,
     MarkItDownUnavailableError,
 )
@@ -257,7 +257,7 @@ class KnowledgeBaseManager(QDialog):
             and single is not None
             and single_path is not None
             and single_path.is_file()
-            and single_suffix in CONVERTIBLE_EXTENSIONS
+            and single_suffix not in DIRECT_READ_EXTENSIONS
         )
         self._edit_button.setEnabled(is_editable or is_viewable)
         if is_viewable and not is_editable:
@@ -494,7 +494,7 @@ class KnowledgeBaseManager(QDialog):
             self._edit_text_file(file_path)
         elif suffix == ".csv":
             self._edit_csv_file(file_path)
-        elif suffix in CONVERTIBLE_EXTENSIONS:
+        elif suffix not in DIRECT_READ_EXTENSIONS:
             self._view_converted_file(file_path)
         else:
             open_external(path)

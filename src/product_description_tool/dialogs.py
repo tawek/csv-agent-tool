@@ -5,7 +5,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from product_description_tool.kb_conversion import ALL_KB_EXTENSIONS
+from product_description_tool.kb_conversion import KnowledgeBaseContentService
 
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QCloseEvent, QPainter, QTextDocument
@@ -30,6 +30,8 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -967,16 +969,12 @@ class AddKbAttachmentsDialog(QDialog):
         self.search_edit.textChanged.connect(self._rebuild_list)
         layout.addWidget(self.search_edit)
 
-        self.list_widget = QTableWidget(0, 2)
-        self.list_widget.setHorizontalHeaderLabels(["", "File"])
-        self.list_widget.verticalHeader().setVisible(False)
-        self.list_widget.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch
-        )
-        self.list_widget.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.ResizeToContents
-        )
-        layout.addWidget(self.list_widget, 1)
+        self.tree_widget = QTreeWidget()
+        self.tree_widget.setColumnCount(1)
+        self.tree_widget.setHeaderLabels(["Knowledge-base file"])
+        self.tree_widget.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tree_widget.itemChanged.connect(self._update_add_button)
+        layout.addWidget(self.tree_widget, 1)
 
         self.status_label = QLabel("")
         self.status_label.setStyleSheet("color: gray;")
@@ -999,27 +997,39 @@ class AddKbAttachmentsDialog(QDialog):
         search_text = self.search_edit.text().strip().lower()
         rows = [p for p in self._kb_files if not search_text or search_text in p.lower()]
 
-        self.list_widget.setRowCount(len(rows))
-        for row_idx, path in enumerate(rows):
-            already = path in self._existing_sources
-            chk = QTableWidgetItem()
-            chk.setFlags(
-                Qt.ItemFlag.ItemIsEnabled
-                | Qt.ItemFlag.ItemIsUserCheckable
-                | Qt.ItemFlag.ItemIsSelectable
-            )
-            if already:
-                chk.setCheckState(Qt.CheckState.Unchecked)
-                chk.setFlags(chk.flags() & ~Qt.ItemFlag.ItemIsEnabled)
-            else:
-                chk.setCheckState(Qt.CheckState.Unchecked)
-            self.list_widget.setItem(row_idx, 0, chk)
+        self.tree_widget.clear()
+        for path in rows:
+            parts = path.split("/")
+            parent = self.tree_widget.invisibleRootItem()
+            current_path_parts: list[str] = []
+            for part in parts[:-1]:
+                current_path_parts.append(part)
+                child = None
+                for index in range(parent.childCount()):
+                    candidate = parent.child(index)
+                    if candidate.text(0) == part and candidate.data(0, Qt.ItemDataRole.UserRole) is None:
+                        child = candidate
+                        break
+                if child is None:
+                    child = QTreeWidgetItem([part])
+                    child.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                    child.setData(0, Qt.ItemDataRole.UserRole, None)
+                    parent.addChild(child)
+                parent = child
 
-            item = QTableWidgetItem(path)
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            already = path in self._existing_sources
+            leaf = QTreeWidgetItem([parts[-1]])
+            leaf.setData(0, Qt.ItemDataRole.UserRole, path)
+            flags = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable
+            if not already:
+                flags |= Qt.ItemFlag.ItemIsEnabled
+            leaf.setFlags(flags)
+            leaf.setCheckState(0, Qt.CheckState.Unchecked)
             if already:
-                item.setForeground(QColor("gray"))
-            self.list_widget.setItem(row_idx, 1, item)
+                leaf.setForeground(0, QColor("gray"))
+            parent.addChild(leaf)
+
+        self.tree_widget.expandAll()
 
         if not rows:
             if not self._kb_files:
@@ -1029,7 +1039,6 @@ class AddKbAttachmentsDialog(QDialog):
         else:
             self.status_label.setText("")
 
-        self.list_widget.itemChanged.connect(self._update_add_button)
         self._update_add_button()
 
     def _update_add_button(self) -> None:
@@ -1037,20 +1046,28 @@ class AddKbAttachmentsDialog(QDialog):
 
     def _count_checked(self) -> int:
         count = 0
-        for row in range(self.list_widget.rowCount()):
-            item = self.list_widget.item(row, 0)
-            if item is not None and item.checkState() == Qt.CheckState.Checked:
-                count += 1
+        stack = [self.tree_widget.invisibleRootItem()]
+        while stack:
+            parent = stack.pop()
+            for index in range(parent.childCount()):
+                item = parent.child(index)
+                path = item.data(0, Qt.ItemDataRole.UserRole)
+                if path and item.checkState(0) == Qt.CheckState.Checked:
+                    count += 1
+                stack.append(item)
         return count
 
     def _confirm(self) -> None:
         sources = []
-        for row in range(self.list_widget.rowCount()):
-            item = self.list_widget.item(row, 0)
-            if item is not None and item.checkState() == Qt.CheckState.Checked:
-                src_item = self.list_widget.item(row, 1)
-                if src_item is not None:
-                    sources.append(src_item.text())
+        stack = [self.tree_widget.invisibleRootItem()]
+        while stack:
+            parent = stack.pop()
+            for index in range(parent.childCount()):
+                item = parent.child(index)
+                path = item.data(0, Qt.ItemDataRole.UserRole)
+                if path and item.checkState(0) == Qt.CheckState.Checked:
+                    sources.append(path)
+                stack.append(item)
         self._selected_sources = sources
         self.accept()
 
@@ -1309,8 +1326,14 @@ class AttachmentManager(QDialog):
             return "Path escapes KB directory"
         if not candidate.exists():
             return "File not found"
-        if candidate.suffix.lower() not in ALL_KB_EXTENSIONS:
-            return "Unsupported type"
+        svc = KnowledgeBaseContentService()
+        err_msg = svc.validate_supported(candidate)
+        if err_msg is not None:
+            return err_msg
+        try:
+            svc.load_markdown(candidate, kb_path)
+        except Exception as exc:  # noqa: BLE001
+            return str(exc)
         return "Available"
 
     def _resolve_column_status(self, source: str) -> str:

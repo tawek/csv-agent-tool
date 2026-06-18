@@ -240,7 +240,7 @@ class TestDirectoryManagement:
         assert window._delete_button.isEnabled() is True
 
     def test_edit_button_enabled_only_for_supported_types(self, qtbot, kb_dir: Path) -> None:
-        """Edit button is enabled for .md, .txt, .csv but not for other files."""
+        """Edit button is enabled for direct files and view-enabled for non-direct files."""
         window = KnowledgeBaseManager(kb_directory=str(kb_dir))
         qtbot.addWidget(window)
         window.show()
@@ -261,6 +261,23 @@ class TestDirectoryManagement:
             window._tree.selectionModel().SelectionFlag.Select,
         )
         assert window._edit_button.isEnabled() is True
+
+    def test_non_direct_file_shows_view_button(self, qtbot, kb_dir: Path) -> None:
+        """A non-direct KB file exposes the converted view action."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+        window.show()
+
+        pdf_path = kb_dir / "manual.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 fake")
+        pdf_index = window._model.index(str(pdf_path))
+        window._tree.selectionModel().select(
+            pdf_index,
+            window._tree.selectionModel().SelectionFlag.Select,
+        )
+
+        assert window._edit_button.isEnabled() is True
+        assert window._edit_button.text() == "View"
 
     def test_open_in_explorer_without_root_shows_message(self, qtbot, monkeypatch) -> None:
         """Open in explorer with no root shows an info message."""
@@ -1389,9 +1406,6 @@ class TestConvertibleFileViewing:
 
     def test_view_button_enabled_for_convertible_file(self, qtbot, kb_dir, tmp_path):
         """The primary action button shows 'View' for convertible files."""
-        from product_description_tool.kb_window import CONVERTIBLE_EXTENSIONS as kdex
-
-        # Pick a convertible extension for this test
         html_file = kb_dir / "test.html"
         html_file.write_text("<html><body><p>Hello</p></body></html>", encoding="utf-8")
 

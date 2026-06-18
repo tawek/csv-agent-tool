@@ -24,8 +24,9 @@ CONVERTIBLE_EXTENSIONS: frozenset[str] = frozenset({
     ".epub",
 })
 
-# Complete set of extensions usable in KB operations (prompt references,
-# attachments, and file browsing).
+# Complete set of direct-read and commonly known convertible extensions.
+# Runtime support is capability-based: any non-direct KB file may be offered
+# for conversion, and MarkItDown decides whether it can be converted.
 ALL_KB_EXTENSIONS: frozenset[str] = DIRECT_READ_EXTENSIONS | CONVERTIBLE_EXTENSIONS
 
 
@@ -146,18 +147,21 @@ class KnowledgeBaseContentService:
 
     @staticmethod
     def classify_suffix(suffix: str) -> str:
-        """Classify a file suffix as ``'direct_read'``, ``'convertible'``, or ``'unsupported'``."""
+        """Classify a suffix as ``'direct_read'`` or ``'convertible'``.
+
+        Any non-direct file is treated as conversion-backed at runtime so the
+        KB picker and viewer can stay capability-based instead of relying on a
+        hardcoded allowlist.
+        """
         s = suffix.lower()
         if s in DIRECT_READ_EXTENSIONS:
             return "direct_read"
-        if s in CONVERTIBLE_EXTENSIONS:
-            return "convertible"
-        return "unsupported"
+        return "convertible"
 
     @staticmethod
     def is_supported_extension(suffix: str) -> bool:
-        """Return True if the suffix is known as either direct-read or convertible."""
-        return suffix.lower() in ALL_KB_EXTENSIONS
+        """Return True for any suffix handled by KB content loading."""
+        return True
 
     def is_conversion_available(self) -> bool:
         """Check whether MarkItDown is importable for conversion."""
@@ -166,18 +170,11 @@ class KnowledgeBaseContentService:
     def validate_supported(self, file_path: Path) -> str | None:
         """Validate that *file_path* has a supported type.
 
-        Returns an error message string if the type is unsupported or if
-        conversion is required but MarkItDown is unavailable.
+        Returns an error message string if conversion is required but
+        MarkItDown is unavailable.
         Returns ``None`` when the file can be used.
         """
-        suffix = file_path.suffix.lower()
-        classification = self.classify_suffix(suffix)
-        if classification == "unsupported":
-            supported = ", ".join(sorted(ALL_KB_EXTENSIONS))
-            return (
-                f"unsupported file type '{suffix}' "
-                f"(supported: {supported})"
-            )
+        classification = self.classify_suffix(file_path.suffix.lower())
         if classification == "convertible" and not self._check_markitdown():
             return (
                 f"file '{file_path.name}' requires conversion to Markdown "
@@ -205,7 +202,7 @@ class KnowledgeBaseContentService:
             MarkItDownUnavailableError: Conversion needed but MarkItDown is
                 not importable.
             ConversionFailedError: Conversion attempt failed.
-            UnsupportedFileTypeError: File type is not convertible.
+            UnsupportedFileTypeError: Reserved for future explicit hard rejects.
         """
         resolved_path = file_path.resolve()
         resolved_root = kb_root.resolve()
@@ -225,41 +222,32 @@ class KnowledgeBaseContentService:
         if not resolved_path.is_file():
             raise ValueError(f"Not a file: {resolved_path}")
 
-        suffix = resolved_path.suffix.lower()
-        classification = self.classify_suffix(suffix)
+        classification = self.classify_suffix(resolved_path.suffix.lower())
 
         if classification == "direct_read":
             return resolved_path.read_text(encoding="utf-8")
 
-        if classification == "convertible":
-            # Check cache first
-            cached = self._cache.get_cached_content(resolved_path)
-            if cached is not None:
-                return cached
+        # Check cache first
+        cached = self._cache.get_cached_content(resolved_path)
+        if cached is not None:
+            return cached
 
-            # Check MarkItDown availability
-            if not self._check_markitdown():
-                raise MarkItDownUnavailableError(
-                    f"Cannot convert '{resolved_path.name}': "
-                    "MarkItDown is not available."
-                )
+        if not self._check_markitdown():
+            raise MarkItDownUnavailableError(
+                f"Cannot convert '{resolved_path.name}': "
+                "MarkItDown is not available."
+            )
 
-            # Convert
-            try:
-                from markitdown import MarkItDown
+        try:
+            from markitdown import MarkItDown
 
-                converter = MarkItDown()
-                result = converter.convert(str(resolved_path))
-                markdown_content = result.text_content
-            except Exception as exc:
-                raise ConversionFailedError(
-                    f"Failed to convert '{resolved_path.name}': {exc}"
-                ) from exc
+            converter = MarkItDown()
+            result = converter.convert(str(resolved_path))
+            markdown_content = result.text_content
+        except Exception as exc:
+            raise ConversionFailedError(
+                f"Failed to convert '{resolved_path.name}': {exc}"
+            ) from exc
 
-            # Cache and return
-            self._cache.store(resolved_path, markdown_content)
-            return markdown_content
-
-        raise UnsupportedFileTypeError(
-            f"Unsupported file type '{suffix}' for '{resolved_path.name}'."
-        )
+        self._cache.store(resolved_path, markdown_content)
+        return markdown_content

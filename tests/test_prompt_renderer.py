@@ -220,17 +220,17 @@ class TestKnowledgeBaseRefs:
     def test_validate_raises_for_unsupported_extension(self, tmp_path: Path) -> None:
         kb_dir = tmp_path / "kb"
         kb_dir.mkdir()
-        (kb_dir / "script.py").write_text("x = 1", encoding="utf-8")
+        (kb_dir / "binary.exe").write_bytes(b"MZ\x90")
 
         renderer = PromptRenderer()
         with pytest.raises(KnowledgeBaseRefError) as exc_info:
             renderer.validate(
-                "Use {{@script.py}}",
+                "Use {{@binary.exe}}",
                 ["title"],
                 knowledge_base_dir=str(kb_dir),
             )
         errors = exc_info.value.errors
-        assert any("unsupported" in e.lower() for e in errors)
+        assert any("failed to convert" in e.lower() for e in errors)
 
     def test_validate_raises_for_path_escaping_kb_dir(self, tmp_path: Path) -> None:
         kb_dir = tmp_path / "kb"

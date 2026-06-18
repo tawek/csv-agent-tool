@@ -14,7 +14,6 @@ from product_description_tool.kb_conversion import (
     ConversionFailedError,
     KnowledgeBaseContentService,
     MarkItDownUnavailableError,
-    UnsupportedFileTypeError,
 )
 
 
@@ -57,16 +56,16 @@ class TestClassification:
 
     def test_classify_suffix_unsupported(self) -> None:
         svc = KnowledgeBaseContentService()
-        assert svc.classify_suffix(".exe") == "unsupported"
-        assert svc.classify_suffix(".py") == "unsupported"
-        assert svc.classify_suffix(".jpg") == "unsupported"
+        assert svc.classify_suffix(".exe") == "convertible"
+        assert svc.classify_suffix(".py") == "convertible"
+        assert svc.classify_suffix(".jpg") == "convertible"
 
     def test_is_supported_extension(self) -> None:
         svc = KnowledgeBaseContentService()
         assert svc.is_supported_extension(".md") is True
         assert svc.is_supported_extension(".pdf") is True
         assert svc.is_supported_extension(".txt") is True
-        assert svc.is_supported_extension(".exe") is False
+        assert svc.is_supported_extension(".exe") is True
 
 
 # ===================================================================
@@ -176,16 +175,14 @@ class TestKnowledgeBaseContentService:
         assert svc.validate_supported(kb_dir / "data.csv") is None
         assert svc.validate_supported(kb_dir / "notes.txt") is None
 
-    def test_validate_supported_rejects_unsupported(self, kb_dir: Path) -> None:
+    def test_validate_supported_accepts_runtime_convertible_file(self, kb_dir: Path) -> None:
         svc = KnowledgeBaseContentService()
         err = svc.validate_supported(kb_dir / "help.md")
         assert err is None
-        # .py is not in ALL_KB_EXTENSIONS
         bad = kb_dir / "script.py"
         bad.write_text("x=1")
         err = svc.validate_supported(bad)
-        assert err is not None
-        assert "unsupported" in err.lower()
+        assert err is None
 
     def test_validate_supported_convertible_checks_markitdown(self, kb_dir: Path) -> None:
         """For convertible files, validate_supported checks MarkItDown availability."""
@@ -293,11 +290,11 @@ class TestKnowledgeBaseContentService:
         with pytest.raises(ValueError, match="Not a file"):
             svc.load_markdown(kb_dir, kb_dir)
 
-    def test_load_markdown_raises_for_unsupported_type(self, kb_dir: Path) -> None:
+    def test_load_markdown_raises_for_unconvertible_file(self, kb_dir: Path) -> None:
         svc = KnowledgeBaseContentService()
         exe = kb_dir / "binary.exe"
         exe.write_bytes(b"MZ\x90")
-        with pytest.raises(UnsupportedFileTypeError, match="Unsupported"):
+        with pytest.raises(ConversionFailedError, match="Failed to convert"):
             svc.load_markdown(exe, kb_dir)
 
     def test_load_markdown_raises_when_markitdown_unavailable(

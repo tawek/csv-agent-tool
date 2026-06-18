@@ -9,12 +9,13 @@ PLACEHOLDER_PATTERN = re.compile(r"{{\s*(.+?)\s*}}")
 
 from product_description_tool.kb_conversion import (
     ALL_KB_EXTENSIONS,
-    CONVERTIBLE_EXTENSIONS,
+    ConversionFailedError,
     KnowledgeBaseContentService,
+    MarkItDownUnavailableError,
 )
 
 KB_REF_PREFIX = "@"
-# All KB-supported extensions: direct-read and convertible types.
+# Historical alias kept for tests and UI copy; validation is capability-based.
 SUPPORTED_KB_EXTENSIONS = ALL_KB_EXTENSIONS
 
 
@@ -130,31 +131,19 @@ class PromptRenderer:
                 errors.append(f"{placeholder}: not a file")
                 continue
 
-            # Check supported extension
-            if candidate.suffix.lower() not in SUPPORTED_KB_EXTENSIONS:
-                supported = ", ".join(sorted(SUPPORTED_KB_EXTENSIONS))
-                errors.append(
-                    f"{placeholder}: unsupported file type '{candidate.suffix}' "
-                    f"(supported: {supported})"
-                )
+            svc = KnowledgeBaseContentService()
+            err_msg = svc.validate_supported(candidate)
+            if err_msg is not None:
+                errors.append(f"{placeholder}: {err_msg}")
                 continue
-
-            # For convertible file types, validate the conversion path
-            if candidate.suffix.lower() in CONVERTIBLE_EXTENSIONS:
-                svc = KnowledgeBaseContentService()
-                err_msg = svc.validate_supported(candidate)
-                if err_msg is not None:
-                    errors.append(f"{placeholder}: {err_msg}")
-                    continue
-
-            # Check readable (direct-read files only; convertible files
-            # are validated by the conversion service at load time)
-            if candidate.suffix.lower() not in CONVERTIBLE_EXTENSIONS:
-                try:
-                    candidate.read_bytes()
-                except (OSError, PermissionError):
-                    errors.append(f"{placeholder}: file is not readable")
-                    continue
+            try:
+                svc.load_markdown(candidate, kb_path)
+            except MarkItDownUnavailableError as exc:
+                errors.append(f"{placeholder}: {exc}")
+            except ConversionFailedError as exc:
+                errors.append(f"{placeholder}: {exc}")
+            except (OSError, PermissionError):
+                errors.append(f"{placeholder}: file is not readable")
 
         if errors:
             raise KnowledgeBaseRefError(errors)
@@ -176,10 +165,7 @@ class PromptRenderer:
                 ref_path = name[len(KB_REF_PREFIX):]
                 resolved = (kb_path / ref_path).resolve()
                 try:
-                    suffix = resolved.suffix.lower()
-                    if suffix in CONVERTIBLE_EXTENSIONS:
-                        return content_svc.load_markdown(resolved, kb_path)
-                    return resolved.read_text(encoding="utf-8")
+                    return content_svc.load_markdown(resolved, kb_path)
                 except (OSError, PermissionError, ValueError):
                     return ""
             return row.get(name, "")

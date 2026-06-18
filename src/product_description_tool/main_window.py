@@ -35,7 +35,6 @@ from product_description_tool.dialogs import (
 )
 from product_description_tool.filter_proxy import WildcardFilterProxyModel
 from product_description_tool.generation import GenerationService
-from product_description_tool.kb_conversion import ALL_KB_EXTENSIONS
 from product_description_tool.kb_editor import MarkdownEditor, open_external
 from product_description_tool.kb_window import KnowledgeBaseManager
 
@@ -702,17 +701,16 @@ class MainWindow(QMainWindow):
             self.attachment_count_label.setText(f"{count} {label} configured")
 
     def _gather_available_kb_files(self) -> list[str]:
-        """Return list of relative KB file paths under the project KB directory."""
+        """Return all relative KB file paths under the project KB directory."""
         if not self.project.knowledge_base_dir:
             return []
         kb_path = Path(self.project.knowledge_base_dir).resolve()
         if not kb_path.is_dir():
             return []
-        supported = ALL_KB_EXTENSIONS
         files: list[str] = []
         try:
             for entry in kb_path.rglob("*"):
-                if entry.is_file() and entry.suffix.lower() in supported:
+                if entry.is_file():
                     rel = entry.relative_to(kb_path)
                     files.append(str(rel.as_posix()))
         except (OSError, PermissionError):
