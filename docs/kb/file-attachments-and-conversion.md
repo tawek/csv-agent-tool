@@ -26,30 +26,35 @@ text). No conversion is applied.
 - `.xlsx`, `.xls`
 - `.html`, `.htm`
 - `.epub`
+- `.odt`
+- `.ods`
 
-These require **MarkItDown** for conversion to Markdown before they can be
-used as attachment content. Conversion results are cached by source content
-hash under `~/.cache/product-description-tool/kb-markitdown/`.
+These require conversion to Markdown before they can be used as attachment
+content. Most formats use **MarkItDown**. `.odt` uses an app-local structured
+XML converter, and `.ods` uses **odfpy**. Conversion results are cached by
+source content hash under `~/.cache/product-description-tool/kb-markitdown/`.
 
 ### Runtime support model
 The app now treats KB conversion as capability-based rather than allowlist-based:
 
 - direct-read suffixes still open as UTF-8 text without conversion,
 - any other KB file can be selected for attachment or in-app viewing, and
-- MarkItDown determines at runtime whether conversion succeeds for that file.
+- the matching conversion backend determines at runtime whether conversion
+  succeeds for that file.
 
 `ALL_KB_EXTENSIONS` remains as a catalog of direct-read plus commonly known convertible examples, but picker and validation flows must not use it as a hard gate.
 
 Used by:
 - `prompt_renderer.py::SUPPORTED_KB_EXTENSIONS` remains a compatibility alias for tests and documentation, but runtime validation is performed by `KnowledgeBaseContentService.load_markdown()`.
 
-## MarkItDown Integration
+## Conversion Backends
 
-### Dependency
+### Dependencies
 ```toml
 markitdown[docx,outlook,pdf,pptx,xls,xlsx]>=0.1.6
+odfpy>=1.4.1
 ```
-From `pyproject.toml` line 9.
+From `pyproject.toml`.
 
 ### Runtime detection
 `KnowledgeBaseContentService._check_markitdown()` attempts `import markitdown`
@@ -59,18 +64,33 @@ and caches the result. Used by:
 - `load_markdown()` — raises `MarkItDownUnavailableError` if conversion is
   needed and MarkItDown is not importable.
 
+`KnowledgeBaseContentService._check_odfpy()` attempts `import odf` and caches
+the result. Used for `.ods` validation and conversion; missing `.ods` backend
+failures raise `ConversionBackendUnavailableError` with an `odfpy`-specific
+message.
+
 ### Conversion flow (`kb_conversion.py::load_markdown()`)
 1. Classify suffix via `classify_suffix()`.
 2. Direct-read: return UTF-8 text as-is.
 3. Any other file: check cache first (by SHA-256 content hash).
-4. Cache miss → instantiate `markitdown.MarkItDown()`, call
-   `.convert(str(source_path))`, store cache entry + metadata JSON.
-5. Return `result.text_content`.
+4. Cache miss:
+   - `.odt` → parse `content.xml` directly and preserve headings, lists,
+     preformatted blocks, and tables.
+   - `.ods` → extract spreadsheet text with `odfpy`.
+   - other formats → instantiate `markitdown.MarkItDown()`, call
+     `.convert(str(source_path))`.
+5. Store cache entry + metadata JSON.
+6. Return the converted Markdown text.
 
 ### Cache invalidation
 Cache key incorporates SHA-256 of source bytes, file suffix, and converter
-identity (`markitdown-<version>`). Source change → different hash → cache
-miss.
+identity. The identity is backend-specific:
+
+- `.odt` → `odt-stdlib-kb-local-v2`
+- `.ods` → `odfpy-<version>`
+- other convertible formats → `markitdown-<version>`
+
+Source change or backend identity change → different key → cache miss.
 
 ### PyInstaller packaging
 The spec file (`packaging/product_description_tool.spec`) explicitly collects
@@ -121,15 +141,15 @@ All use the same hardcoded filter: `"CSV Files (*.csv);;All Files (*)"` in:
    <value>
    --- End attachment ---
    ```
-   For KB convertible files, `KnowledgeBaseContentService.load_markdown()` is
-   called (with caching), which uses MarkItDown for conversion.
+    For KB convertible files, `KnowledgeBaseContentService.load_markdown()` is
+    called with caching and the file is routed to the matching conversion
+    backend.
 
 ## Requirements for Adding New File Types
 
-1. **Confirm MarkItDown support** — test that
-   `markitdown.MarkItDown().convert(path)` works for the format. If not,
-   install additional extras (e.g., `markitdown[<extra>]`) and update the
-   dependency in `pyproject.toml`.
+1. **Confirm or implement a backend** — prefer MarkItDown when it works for the
+   format. If it does not, add a focused app-local converter or another local
+   dependency and validate the real output quality.
 2. **Update `CONVERTIBLE_EXTENSIONS`** only when you want the new format listed as a known example or called out explicitly in tests/documentation.
 3. **Update tests** in `tests/test_kb_conversion.py`:
    `TestClassification.test_convertible_extensions` for new known convertible

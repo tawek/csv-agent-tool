@@ -288,8 +288,8 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
    - `{{@relative/path.ext}}` references a knowledge-base file within the project's configured knowledge-base directory.
 6. Knowledge-base references are project-scoped:
    - The knowledge-base directory is configured per project.
-   - Supported referenced file types include directly readable text formats (`.md`, `.markdown`, `.txt`, `.csv`) and additional local file types that the application's MarkItDown-backed conversion capability can successfully convert to Markdown for prompt use.
-   - Packaged desktop builds bundle the MarkItDown runtime dependencies required for the application's supported local conversion formats, including PDF conversion.
+   - Supported referenced file types include directly readable text formats (`.md`, `.markdown`, `.txt`, `.csv`) and additional local file types that the application's file-to-Markdown conversion capability can successfully convert for prompt use.
+   - Packaged desktop builds bundle the runtime dependencies required for the application's supported local conversion formats, including PDF conversion and OpenDocument conversion.
    - Referenced paths are interpreted relative to the configured knowledge-base directory.
    - Referenced paths must not escape the configured knowledge-base directory.
    - Directly readable text formats are inserted from the source file contents.
@@ -299,7 +299,8 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 7. The template is validated before preview or batch processing starts:
    - Unknown `{{column_name}}` placeholders cause an error dialog.
    - Every `{{@...}}` reference must resolve to an existing supported file within the configured knowledge-base directory.
-   - If a referenced file requires conversion, the application's MarkItDown integration must be available and working before preview or processing starts.
+   - If a referenced file requires conversion, the application's matching conversion backend for that file type must be available and working before preview or processing starts.
+   - ODT conversion should preserve common document structure where present, including headings, list items, preformatted blocks, and tables, instead of flattening the document into loose paragraph text.
    - Missing, unsupported, unreadable, escaping, conversion-unavailable, or conversion-failed knowledge-base references cause an error dialog and block preview and processing.
 
 **Postconditions:** The prompt template text is updated in the project definition and will be persisted on next save.
@@ -329,7 +330,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 6. The application must not present CSV columns as a virtual knowledge-base branch, folder, or directory analogue. Knowledge-base files and CSV columns remain separate concepts in the selection UX even though both become attachments in the same ordered list.
 7. Knowledge-base-file attachment selection may include both directly readable knowledge-base files and non-editable local files that the application can convert to Markdown for prompt use.
 8. The knowledge-base-file picker presents the configured knowledge-base contents in a tree-like directory view rooted at the project knowledge-base directory so files inside subdirectories remain selectable in place.
-9. Every file under the configured knowledge-base directory is selectable in that picker. Directly readable text and CSV files are embedded as-is; any other selected file is handled through the application's MarkItDown-backed conversion path and the resulting Markdown is what gets appended to the effective prompt.
+9. Every file under the configured knowledge-base directory is selectable in that picker. Directly readable text and CSV files are embedded as-is; any other selected file is handled through the application's file-to-Markdown conversion path and the resulting Markdown is what gets appended to the effective prompt.
 10. Each add flow may support selecting one or more sources of its own type in a single confirmation.
 11. When the user confirms an add action, the chosen sources are inserted into the selected prompt's attachment list in a default order that places knowledge-base-file attachments before CSV-column attachments so the effective prompt's knowledge-base prefix remains stable by default.
    - Adding one or more knowledge-base-file attachments places those new file attachments after any existing knowledge-base-file attachments and before any existing CSV-column attachments.
@@ -344,7 +345,7 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
 
 **Error conditions:**
 - If the user tries to add a knowledge-base-file attachment when no project knowledge-base directory is configured, the add flow is blocked and the user is informed.
-- If the user tries to execute a prompt whose selected knowledge-base-file attachment requires conversion but the MarkItDown integration is unavailable or failing, the application warns that the file cannot be included and blocks the run rather than silently omitting it.
+- If the user tries to execute a prompt whose selected knowledge-base-file attachment requires conversion but the matching conversion backend is unavailable or failing, the application warns that the file cannot be included and blocks the run rather than silently omitting it.
 - If no valid selectable sources exist for the requested source type, that source-specific add flow may open in an empty state or its add action may be disabled, but the application must not create invalid attachment entries silently.
 
 **Invariants:**
@@ -723,7 +724,7 @@ User clicks the `+` or `-` button in any pane header.
 2. The user may navigate through subdirectories within that root.
 3. For any file, the application always offers an external viewer or editor action that opens the selected file with the operating system's default associated application.
 4. For directly editable knowledge-base files, the explorer offers embedded edit actions as defined by Use Cases 26 and 27.
-5. For any non-direct local file under the knowledge-base root, the explorer offers an internal Markdown view action as defined by Use Case 29; whether the file can actually be viewed depends on the application's MarkItDown conversion capability for that specific file.
+5. For any non-direct local file under the knowledge-base root, the explorer offers an internal Markdown view action as defined by Use Case 29; whether the file can actually be viewed depends on the application's file-to-Markdown conversion capability for that specific file.
 6. The user may create a new knowledge-base folder within the knowledge-base root.
    - If a folder is selected, the new folder is created inside that folder.
    - If a file is selected, the new folder is created in that file's parent folder.
