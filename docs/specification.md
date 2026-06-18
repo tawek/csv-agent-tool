@@ -328,15 +328,17 @@ The application runs on Python 3.14+ with PySide6, supports Ollama and OpenAI-co
    - **Add CSV-column attachment** opens a small modal column-selection flow specialized for CSV columns, such as a dedicated list or dropdown of available columns.
 6. The application must not present CSV columns as a virtual knowledge-base branch, folder, or directory analogue. Knowledge-base files and CSV columns remain separate concepts in the selection UX even though both become attachments in the same ordered list.
 7. Knowledge-base-file attachment selection may include both directly readable knowledge-base files and non-editable local files that the application can convert to Markdown for prompt use.
-8. Each add flow may support selecting one or more sources of its own type in a single confirmation.
-9. When the user confirms an add action, the chosen sources are inserted into the selected prompt's attachment list in a default order that places knowledge-base-file attachments before CSV-column attachments so the effective prompt's knowledge-base prefix remains stable by default.
+8. The knowledge-base-file picker presents the configured knowledge-base contents in a tree-like directory view rooted at the project knowledge-base directory so files inside subdirectories remain selectable in place.
+9. Every file under the configured knowledge-base directory is selectable in that picker. Directly readable text and CSV files are embedded as-is; any other selected file is handled through the application's MarkItDown-backed conversion path and the resulting Markdown is what gets appended to the effective prompt.
+10. Each add flow may support selecting one or more sources of its own type in a single confirmation.
+11. When the user confirms an add action, the chosen sources are inserted into the selected prompt's attachment list in a default order that places knowledge-base-file attachments before CSV-column attachments so the effective prompt's knowledge-base prefix remains stable by default.
    - Adding one or more knowledge-base-file attachments places those new file attachments after any existing knowledge-base-file attachments and before any existing CSV-column attachments.
    - Adding one or more CSV-column attachments places those new column attachments after all existing attachments.
    - Within a single add action, the chosen sources preserve the order returned by that source-specific selection flow unless the user later reorders them.
-10. The user may remove any existing attachment from the list.
-11. The user may reorder attachments within the list, including moving CSV-column attachments above knowledge-base-file attachments. The displayed order is the effective processing order.
-12. Attachment changes update the selected prompt's metadata and mark the project dirty.
-13. If the effective order places any CSV-column attachment before any knowledge-base-file attachment, the attachment-management UI shows a small fine-print warning that this arrangement may increase prompt cost because knowledge-base-file content may need to be reprocessed instead of benefiting from stable-prefix caching.
+12. The user may remove any existing attachment from the list.
+13. The user may reorder attachments within the list, including moving CSV-column attachments above knowledge-base-file attachments. The displayed order is the effective processing order.
+14. Attachment changes update the selected prompt's metadata and mark the project dirty.
+15. If the effective order places any CSV-column attachment before any knowledge-base-file attachment, the attachment-management UI shows a small fine-print warning that this arrangement may increase prompt cost because knowledge-base-file content may need to be reprocessed instead of benefiting from stable-prefix caching.
 
 **Postconditions:** The selected prompt has an ordered attachment list stored as prompt metadata, separate from the prompt text.
 
@@ -721,7 +723,7 @@ User clicks the `+` or `-` button in any pane header.
 2. The user may navigate through subdirectories within that root.
 3. For any file, the application always offers an external viewer or editor action that opens the selected file with the operating system's default associated application.
 4. For directly editable knowledge-base files, the explorer offers embedded edit actions as defined by Use Cases 26 and 27.
-5. For supported non-editable local files that require conversion (for example PDFs and other formats the application's MarkItDown integration can convert), the explorer offers an internal Markdown view action as defined by Use Case 29.
+5. For any non-direct local file under the knowledge-base root, the explorer offers an internal Markdown view action as defined by Use Case 29; whether the file can actually be viewed depends on the application's MarkItDown conversion capability for that specific file.
 6. The user may create a new knowledge-base folder within the knowledge-base root.
    - If a folder is selected, the new folder is created inside that folder.
    - If a file is selected, the new folder is created in that file's parent folder.
@@ -811,11 +813,11 @@ User clicks the `+` or `-` button in any pane header.
 
 **Actor:** User
 
-**Description:** The user opens a supported non-editable knowledge-base file, such as a PDF, in an internal Markdown viewer after local conversion.
+**Description:** The user opens a non-direct knowledge-base file, such as a PDF or office document, in an internal Markdown viewer after local conversion.
 
-**Trigger:** User chooses a view action for a supported convertible knowledge-base file from the knowledge-base explorer.
+**Trigger:** User chooses a view action for a non-direct knowledge-base file from the knowledge-base explorer.
 
-**Preconditions:** A project-scoped knowledge-base directory is configured, the selected file exists within that directory, the file is inside that root, and the file type is one the application's MarkItDown integration can convert for local viewing.
+**Preconditions:** A project-scoped knowledge-base directory is configured, the selected file exists within that directory, the file is inside that root, and the application's MarkItDown integration can convert that specific local file for viewing.
 
 **Flow:**
 
