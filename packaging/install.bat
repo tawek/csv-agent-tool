@@ -63,6 +63,33 @@ set "RC=0"
 :install_done
 
 echo.
+echo Extracting bundled archives...
+set "ZIP_DIR=%INSTALL_DIR%\_internal"
+set "HAS_UNZIP="
+if exist "%ZIP_DIR%\unzip.exe" set "HAS_UNZIP=1"
+if defined HAS_UNZIP (
+    echo Using bundled unzip.exe.
+) else (
+    where powershell >nul 2>&1
+    if errorlevel 1 (
+        echo WARNING: No extraction tool available. Skipping.
+        goto launch_prompt
+    )
+    echo Using PowerShell Expand-Archive.
+)
+
+for %%Z in ("%ZIP_DIR%\*.zip") do (
+    echo   Extracting %%~nxZ ...
+    if defined HAS_UNZIP (
+        "%ZIP_DIR%\unzip.exe" -o "%%Z" -d "%ZIP_DIR%" >nul
+    ) else (
+        powershell -Command "Expand-Archive -Path '%%Z' -DestinationPath '%ZIP_DIR%' -Force" >nul
+    )
+    del "%%Z"
+)
+
+:launch_prompt
+echo.
 echo Installation complete using %COPY_TOOL%. Exit code: %RC%
 echo Launch with: %INSTALL_DIR%\product-description-tool.exe
 pause

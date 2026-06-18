@@ -113,7 +113,16 @@ ssh gfl@192.168.1.13 \
 
 Build takes ~2 minutes.
 
-**Step 8 — Add install.bat**
+**Step 8 — Archive Small-File Directories**
+
+Bundle directories with many small files (tzdata zoneinfo, pdfminer cmap) into single zip files. This reduces the file count for Google Drive sync (~750 files → 2 files). A standalone 32-bit `unzip.exe` is bundled into `_internal/` for extraction at install time.
+
+```bash
+ssh gfl@192.168.1.13 \
+  'cmd.exe /c "cd /d C:\cygwin64\home\gfl\csv-agent-tool && C:\Users\gfl\build-env\Scripts\python.exe packaging\zip-distdirs.py"'
+```
+
+**Step 9 — Add install.bat**
 
 Copy the installation script into the dist directory:
 
@@ -121,7 +130,7 @@ Copy the installation script into the dist directory:
 cp packaging/install.bat /home/gfl/csv-agent-tool/dist/product-description-tool/
 ```
 
-The `install.bat` script copies the application from wherever it was downloaded (e.g., Google Drive folder) to `C:\apps\product-description-tool\`.
+The `install.bat` script copies the application from wherever it was downloaded (e.g., Google Drive folder) to `C:\apps\product-description-tool\`. After the copy, it detects any `.zip` files in `_internal/` and extracts them using either the bundled `unzip.exe` (32-bit, runs on all Windows versions) or PowerShell `Expand-Archive` as fallback.
 
 ---
 
@@ -146,7 +155,9 @@ du -sh "$BUILD_DIR/product-description-tool/"
 # Should be ~250 MB total. If ~550 MB+, the spec excludes were not applied — do NOT upload.
 ```
 
-**Step 10 — Upload to Google Drive**
+After zipping small-file directories, the file count drops from ~1011 to ~260.
+
+**Step 11 — Upload to Google Drive**
 
 Check rclone token expiry first. If expired, re-authenticate:
 
@@ -165,8 +176,68 @@ Verify completion:
 
 ```bash
 rclone size GoogleDrive:WFirma/product-description-tool/
-# Should report ~1000 objects, ~240-250 MiB
+# Should report ~260 objects, ~240-250 MiB (file count reduced by archiving tzdata/pdfminer cmap)
 ```
+
+### Alternative — Deploy via Local Google Drive Mount (no rclone)
+
+If rclone is not configured on the local machine, Google Drive for Desktop mounts the drive at a local path. Use `cp` or `rsync` instead:
+
+**Prerequisite:** Google Drive for Desktop must be installed and syncing the WFirma folder.
+
+**macOS default mount path:**
+```
+/Users/<user>/Library/CloudStorage/GoogleDrive-<email>/My Drive/WFirma/
+```
+
+**Alternative Step 10 — Upload via local mount:**
+
+```bash
+rsync -ahc --delete --progress "$BUILD_DIR/product-description-tool/" \
+  "/Users/tomaswys/Library/CloudStorage/GoogleDrive-tawek76@gmail.com/My Drive/WFirma/product-description-tool/"
+```
+
+**Critical — wait for rsync to fully finish:**
+
+- **Do not terminate rsync.** If it times out or is interrupted, re-run the exact same command. rsync re-transfers only the files that didn't make it. Keep re-running until rsync produces no transfer lines (only directory-traversal lines) and exits cleanly.
+- **Do not delete the source build directory** until you have verified 100% of the deployment. The build directory is the only reference for re-running rsync.
+- Use `-c` (`--checksum`) to compare file contents by checksum, not just size+mtime. This is actually faster for Google Drive's FUSE mount because it avoids false matches from unreliable mtime reporting, and reading local files for checksum is cheap.
+- Use `--delete` to remove stale files from Google Drive that no longer exist in the build (e.g., old tzdata zoneinfo files replaced by tzdata.zip).
+- Use `--progress` so you can see whether files are still being transferred.
+
+**Verification before cleanup:**
+
+```bash
+# 1. Count files — must match the build
+find "$GOOGLE_DRIVE_DIR/product-description-tool/" -type f | wc -l
+
+# 2. Check key files exist
+ls -lh "$GOOGLE_DRIVE_DIR/product-description-tool/product-description-tool.exe"
+ls -lh "$GOOGLE_DRIVE_DIR/product-description-tool/install.bat"
+
+# 3. Check zips are present and non-corrupt
+python3 -c "
+import zipfile, os, sys
+gdrive = sys.argv[1]
+for z in ['tzdata.zip', 'pdfminer-cmap.zip']:
+    path = os.path.join(gdrive, '_internal', z)
+    zf = zipfile.ZipFile(path)
+    names = zf.namelist()
+    print(f'{z}: {len(names)} files, OK')
+    zf.close()
+" "$GOOGLE_DRIVE_DIR/product-description-tool"
+
+# 4. Verify no stale zoneinfo/cmap directories remain
+find "$GOOGLE_DRIVE_DIR/product-description-tool/" -type d \( -name "zoneinfo" -o -name "cmap" \)
+
+# 5. Only now clean up the source build directory
+rm -rf "$BUILD_DIR"
+```
+
+**Notes:**
+- Google Drive for Desktop syncs changed files in the background — there is no CLI confirmation of completion. Wait for the sync icon in the menu bar to finish.
+- rsync transfers only new/changed files, so repeated deployments are incremental.
+- All timestamps shown by `ls -l` on the Google Drive mount are from the FUSE layer, not from the server. Files are considered synced when they appear with non-zero sizes.
 
 ---
 
@@ -192,27 +263,35 @@ uv run python -c "import tomllib, pathlib; data = tomllib.loads(pathlib.Path('py
 ssh gfl@192.168.1.13 \
   'cmd.exe /c "set PYTHONPATH=C:\cygwin64\home\gfl\csv-agent-tool\src && cd /d C:\cygwin64\home\gfl\csv-agent-tool && C:\Users\gfl\build-env\Scripts\python.exe -m PyInstaller --clean --noconfirm packaging\product_description_tool.spec" && rmdir /home/gfl/.build.lock'
 
-# 5. Add install.bat to dist
+# 5. Archive small-file directories (tzdata, pdfminer cmap)
+ssh gfl@192.168.1.13 \
+  'cmd.exe /c "cd /d C:\cygwin64\home\gfl\csv-agent-tool && C:\Users\gfl\build-env\Scripts\python.exe packaging\zip-distdirs.py"'
+
+# 6. Add install.bat to dist
 scp packaging/install.bat gfl@192.168.1.13:/home/gfl/csv-agent-tool/dist/product-description-tool/
 
-# 6. Retrieve via tar stream
+# 7. Retrieve via tar stream
 ssh gfl@192.168.1.13 'cd /home/gfl/csv-agent-tool/dist && tar -czf - product-description-tool' | tar -C "$BUILD_DIR" -xzf -
 
-# 7. Verify size before upload
+# 8. Verify size before upload
 du -sh "$BUILD_DIR/product-description-tool/"
 # If >450 MB, abort — spec excludes were not applied correctly
 
-# 8. Check token and upload
+# 9. Check token and upload (rclone method)
 rclone ls GoogleDrive:WFirma/product-description-tool/ > /dev/null 2>&1 || \
   rclone authorize "drive" "<client_id> <client_secret>"
 rclone copy "$BUILD_DIR/product-description-tool/" GoogleDrive:WFirma/product-description-tool/ \
   --transfers=4 --checkers=8
 
-# 9. Verify size
-rclone size GoogleDrive:WFirma/product-description-tool/
-# Should report ~1000 objects, ~240-250 MiB
+# 9b. Alternative upload via local Google Drive mount (use instead of step 9 if rclone is not configured)
+# GOOGLE_DRIVE_DIR="/Users/tomaswys/Library/CloudStorage/GoogleDrive-tawek76@gmail.com/My Drive/WFirma"
+# rsync -avh --progress "$BUILD_DIR/product-description-tool/" "$GOOGLE_DRIVE_DIR/product-description-tool/"
 
-# 10. Clean up temp directory (only on success — leave on failure for post-mortem)
+# 10. Verify size
+rclone size GoogleDrive:WFirma/product-description-tool/
+# Should report ~260 objects, ~240-250 MiB
+
+# 11. Clean up temp directory (only on success — leave on failure for post-mortem)
 rclone size GoogleDrive:WFirma/product-description-tool/ >/dev/null 2>&1 && rm -rf "$BUILD_DIR"
 ```
 
@@ -262,6 +341,10 @@ This means:
 - Re-running rclone after a build is safe; unchanged files are skipped entirely (0 bytes transferred if nothing changed).
 - The mtime sync is cosmetic — it doesn't affect which files get uploaded.
 - Use `--log-level=INFO --log-file=/tmp/rclone-upload.log` to verify what was actually transferred. The log will say "There was nothing to transfer" when all files are already up to date.
+
+### rclone not configured
+
+If `rclone` is installed but has no config (no `rclone.conf`), or you prefer not to set it up, use the local Google Drive for Desktop mount path instead (see "Alternative — Deploy via Local Google Drive Mount" above). The mount path is available on macOS as long as Google Drive for Desktop is running and signed in.
 
 ### `scp` is too slow for the build directory
 

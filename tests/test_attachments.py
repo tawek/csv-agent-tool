@@ -1194,7 +1194,7 @@ class TestProjectAttachmentPersistence:
         )
         saved_path = repo.save(tmp_path / "test.project.json", project)
 
-        sidecar = saved_path.parent / "desc.prompt.txt"
+        sidecar = saved_path.parent / "desc.prompt.md"
         content = sidecar.read_text(encoding="utf-8")
         assert content == "Write {{sku}}"
         assert "attachment" not in content.lower()
