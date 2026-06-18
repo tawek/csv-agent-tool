@@ -696,7 +696,7 @@ User clicks the `+` or `-` button in any pane header.
 4. The user may set or change the knowledge-base directory by browsing for a folder. The folder-selection dialog must open successfully on supported PySide6 builds and must not fail because of an incompatible dialog-options argument type.
 5. The user may clear the configured knowledge-base directory.
 6. The window provides a file and directory explorer rooted at the configured knowledge-base directory.
-7. If no knowledge-base directory is configured, file-browsing and file-management actions that require a root directory are unavailable until the user sets one.
+7. If no knowledge-base directory is configured, file-browsing and file-management actions that require a root directory are unavailable until the user sets one. This applies consistently to toolbar buttons and context-menu actions.
 8. The user may ask the application to open the knowledge-base directory in the operating system's external file explorer.
 9. The window provides a **Close** action so the user can exit the knowledge-base manager directly from that screen.
 10. Changes to the configured knowledge-base directory are applied to the current project and are persisted on the next project save.
@@ -722,15 +722,34 @@ User clicks the `+` or `-` button in any pane header.
 3. For any file, the application always offers an external viewer or editor action that opens the selected file with the operating system's default associated application.
 4. For directly editable knowledge-base files, the explorer offers embedded edit actions as defined by Use Cases 26 and 27.
 5. For supported non-editable local files that require conversion (for example PDFs and other formats the application's MarkItDown integration can convert), the explorer offers an internal Markdown view action as defined by Use Case 29.
-6. The user may copy a file within the knowledge-base root.
-7. The user may rename a file within the knowledge-base root.
-8. The application may also offer file deletion within the knowledge-base root.
-9. If deletion is offered and the user invokes it, the application shows a confirmation dialog identifying the file to be removed before deletion completes.
-10. After a successful copy, rename, or delete action, the explorer refreshes to show the current filesystem state.
+6. The user may create a new knowledge-base folder within the knowledge-base root.
+   - If a folder is selected, the new folder is created inside that folder.
+   - If a file is selected, the new folder is created in that file's parent folder.
+   - If nothing is selected, the new folder is created at the knowledge-base root.
+   - The user is prompted for the folder name.
+   - The application does not silently overwrite an existing directory or file.
+7. The user may create a new knowledge-base Markdown file (`.md`) or CSV file (`.csv`) within the knowledge-base root.
+   - If a folder is selected, the new file is created in that folder.
+   - If a file is selected, the new file is created in that file's parent folder.
+   - If nothing is selected, the new file is created at the knowledge-base root.
+   - The user is prompted for the new file name. If the requested file type's expected extension is missing, the application appends it automatically.
+   - The application does not overwrite an existing file silently.
+   - After creating the file, the application opens it immediately in the corresponding embedded editor.
+8. The user may copy a file or folder within the knowledge-base root.
+9. The user may rename a file or folder within the knowledge-base root.
+10. The user may move a file or folder to another folder within the knowledge-base root.
+   - The user selects the source item and chooses a destination folder within the knowledge-base root.
+   - The item keeps its current name during the move; renaming remains a separate action.
+   - The application does not silently overwrite an existing file or folder at the destination.
+   - A folder must not be moved into itself or into any folder inside its own subtree.
+11. The application may also offer file or folder deletion within the knowledge-base root.
+12. If deletion is offered and the user invokes it, the application shows a confirmation dialog identifying the selected file or folder to be removed before deletion completes.
+   - Deleting a folder removes its contents recursively after confirmation.
+13. After a successful create, copy, rename, move, or delete action, the explorer refreshes to show the current filesystem state.
 
-**Postconditions:** The knowledge-base directory contents reflect any completed copy, rename, or delete action.
+**Postconditions:** The knowledge-base directory contents reflect any completed create, copy, rename, move, or delete action.
 
-**Error conditions:** Failed filesystem operations, naming conflicts, or attempts to operate outside the configured knowledge-base root are rejected and reported to the user.
+**Error conditions:** Failed filesystem operations, naming conflicts, unsupported create targets, invalid move destinations, or attempts to operate outside the configured knowledge-base root are rejected and reported to the user.
 
 ## Use Case 26: View or Edit a Knowledge-Base Markdown or Text File
 
