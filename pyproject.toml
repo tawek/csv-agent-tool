@@ -7,7 +7,6 @@ requires-python = ">=3.14"
 dependencies = [
   "httpx>=0.28.1",
   "markitdown[docx,outlook,pdf,pptx,xls,xlsx]>=0.1.6",
-  "odfpy>=1.4.1",
   "openai>=2.0.0",
   "platformdirs>=4.3.6",
   "PySide6>=6.9.0",

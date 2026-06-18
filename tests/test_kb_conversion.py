@@ -38,8 +38,6 @@ class TestClassification:
         assert ".xlsx" in CONVERTIBLE_EXTENSIONS
         assert ".html" in CONVERTIBLE_EXTENSIONS
         assert ".epub" in CONVERTIBLE_EXTENSIONS
-        assert ".odt" in CONVERTIBLE_EXTENSIONS
-        assert ".ods" in CONVERTIBLE_EXTENSIONS
 
     def test_all_kb_extensions_union(self) -> None:
         assert ALL_KB_EXTENSIONS == DIRECT_READ_EXTENSIONS | CONVERTIBLE_EXTENSIONS
@@ -177,15 +175,6 @@ class TestKnowledgeBaseContentService:
         assert svc.validate_supported(kb_dir / "help.md") is None
         assert svc.validate_supported(kb_dir / "data.csv") is None
         assert svc.validate_supported(kb_dir / "notes.txt") is None
-
-    def test_validate_supported_accepts_odf(self, kb_dir: Path) -> None:
-        svc = KnowledgeBaseContentService()
-        odt = kb_dir / "doc.odt"
-        odt.write_bytes(b"PK")  # minimal zip sig
-        assert svc.validate_supported(odt) is None
-        ods = kb_dir / "sheet.ods"
-        ods.write_bytes(b"PK")
-        assert svc.validate_supported(ods) is None
 
     def test_validate_supported_rejects_unsupported(self, kb_dir: Path) -> None:
         svc = KnowledgeBaseContentService()
@@ -376,44 +365,6 @@ class TestKnowledgeBaseContentService:
         assert "Item A" in result
         # Should not contain raw HTML tags
         assert "<h1>" not in result
-
-    def test_load_markdown_odt(self, kb_dir: Path) -> None:
-        """ODT files are converted to plain text content."""
-        from odf.opendocument import OpenDocumentText
-        from odf.text import P, H
-
-        odt_path = kb_dir / "document.odt"
-        doc = OpenDocumentText()
-        doc.text.addElement(H(outlinelevel=1, text="ODT Title"))
-        doc.text.addElement(P(text="ODT body content."))
-        doc.save(str(odt_path))
-
-        svc = KnowledgeBaseContentService()
-        result = svc.load_markdown(odt_path, kb_dir)
-        assert "ODT Title" in result
-        assert "ODT body content" in result
-
-    def test_load_markdown_ods(self, kb_dir: Path) -> None:
-        """ODS files are converted to pipe-separated table content."""
-        from odf.opendocument import OpenDocumentSpreadsheet
-        from odf.table import Table, TableRow, TableCell
-        from odf.text import P
-
-        ods_path = kb_dir / "sheet.ods"
-        doc = OpenDocumentSpreadsheet()
-        table = Table(name="Sheet1")
-        row = TableRow()
-        for val in ("A", "B"):
-            cell = TableCell()
-            cell.addElement(P(text=val))
-            row.addElement(cell)
-        table.addElement(row)
-        doc.spreadsheet.addElement(table)
-        doc.save(str(ods_path))
-
-        svc = KnowledgeBaseContentService()
-        result = svc.load_markdown(ods_path, kb_dir)
-        assert "A | B" in result
 
 
 # ===================================================================

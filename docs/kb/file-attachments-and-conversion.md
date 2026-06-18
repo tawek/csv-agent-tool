@@ -32,7 +32,7 @@ used as attachment content. Conversion results are cached by source content
 hash under `~/.cache/product-description-tool/kb-markitdown/`.
 
 ### All KB extensions — `ALL_KB_EXTENSIONS`
-Union of direct-read + convertible sets: 14 extensions total.
+Union of direct-read + convertible sets: 12 extensions total.
 
 Used by:
 - `main_window.py::_gather_available_kb_files()` (line 644) — scans the KB
@@ -93,7 +93,8 @@ The attachment picker only shows `ALL_KB_EXTENSIONS` files (see below).
 
 ### Attachment manager status display
 `dialogs.py::AttachmentManager._resolve_kb_file_status()` (line 1298):
-Shows status per attachment row. **Has a bug** (see below).
+Shows status per attachment row using `ALL_KB_EXTENSIONS`, so direct-read and
+MarkItDown-convertible KB files are reported consistently.
 
 ### CSV import/export dialogs
 All use the same hardcoded filter: `"CSV Files (*.csv);;All Files (*)"` in:
@@ -130,28 +131,6 @@ All use the same hardcoded filter: `"CSV Files (*.csv);;All Files (*)"` in:
    For KB convertible files, `KnowledgeBaseContentService.load_markdown()` is
    called (with caching), which uses MarkItDown for conversion.
 
-## Known Bug: `_resolve_kb_file_status` in AttachmentManager
-
-**File:** `src/product_description_tool/dialogs.py`, line 1310
-
-```python
-# Current (buggy) code:
-if candidate.suffix.lower() not in {".md", ".markdown", ".csv"}:
-    return "Unsupported type"
-```
-
-**Problem:** The status check only recognizes `.md`, `.markdown`, and `.csv`
-as valid. This:
-1. Misses `.txt` (which is in `DIRECT_READ_EXTENSIONS`).
-2. Rejects all convertible types (`.pdf`, `.docx`, `.pptx`, `.xlsx`, `.html`,
-   `.epub`, etc.) as "Unsupported type" even though they are fully supported
-   KB file types.
-
-`dialogs.py` does not import `kb_conversion` or any extension constants.
-The fix would be to use `ALL_KB_EXTENSIONS` (or `DIRECT_READ_EXTENSIONS`)
-from `kb_conversion.py` and also handle the convertible-type status
-(possibly using `KnowledgeBaseContentService`.
-
 ## Requirements for Adding New File Types
 
 1. **Add the extension** to `CONVERTIBLE_EXTENSIONS` in
@@ -163,9 +142,9 @@ from `kb_conversion.py` and also handle the convertible-type status
 3. **Update kb_window.py** `_open_file_for_edit()` (line 321) if the new type
    should be viewable (convertible types already go through the `elif suffix
    in CONVERTIBLE_EXTENSIONS` branch to the read-only viewer).
-4. **Fix `_resolve_kb_file_status()`** in `dialogs.py` line 1310 to use
-   `ALL_KB_EXTENSIONS` or similar, so the status display doesn't falsely
-   report convertible files as unsupported.
+4. **Keep `_resolve_kb_file_status()` aligned** with
+   `ALL_KB_EXTENSIONS`, so the status display matches the actual supported
+   direct-read and MarkItDown-convertible file set.
 5. **Update tests** in `tests/test_kb_conversion.py`:
    `TestClassification.test_convertible_extensions` for new convertible
    types.

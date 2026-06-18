@@ -527,15 +527,6 @@ wheels = [
 ]
 
 [[package]]
-name = "odfpy"
-version = "1.4.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "defusedxml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/97/73/8ade73f6749177003f7ce3304f524774adda96e6aaab30ea79fd8fda7934/odfpy-1.4.1.tar.gz", hash = "sha256:db766a6e59c5103212f3cc92ec8dd50a0f3a02790233ed0b52148b70d3c438ec", size = 717045, upload-time = "2020-01-18T16:55:48.852Z" }
-
-[[package]]
 name = "olefile"
 version = "0.47"
 source = { registry = "https://pypi.org/simple" }
@@ -727,7 +718,6 @@ source = { editable = "." }
 dependencies = [
     { name = "httpx" },
     { name = "markitdown", extra = ["docx", "outlook", "pdf", "pptx", "xls", "xlsx"] },
-    { name = "odfpy" },
     { name = "openai" },
     { name = "platformdirs" },
     { name = "pyside6" },
@@ -744,7 +734,6 @@ dev = [
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "markitdown", extras = ["docx", "outlook", "pdf", "pptx", "xls", "xlsx"], specifier = ">=0.1.6" },
-    { name = "odfpy", specifier = ">=1.4.1" },
     { name = "openai", specifier = ">=2.0.0" },
     { name = "platformdirs", specifier = ">=4.3.6" },
     { name = "pyinstaller", marker = "extra == 'dev'", specifier = ">=6.16.0" },
