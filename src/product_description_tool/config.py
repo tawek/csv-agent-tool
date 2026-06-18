@@ -380,3 +380,6 @@ class RecentProjectsStore:
         paths = self.load()
         paths = [p for p in paths if p.resolve() != resolved]
         self.save(paths)
+
+    def clear(self) -> None:
+        self.save([])

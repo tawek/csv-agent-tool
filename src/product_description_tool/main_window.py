@@ -352,11 +352,17 @@ class MainWindow(QMainWindow):
             noop.setEnabled(False)
             return
         for path in recent:
-            name = path.stem.removesuffix(".project").removesuffix(".project")
-            action = self.open_recent_menu.addAction(name)
+            action = self.open_recent_menu.addAction(str(path.resolve()))
             action.setToolTip(str(path))
             action.setData(str(path))
             action.triggered.connect(self._open_recent_project)
+        self.open_recent_menu.addSeparator()
+        clear_action = self.open_recent_menu.addAction("Clear History")
+        clear_action.triggered.connect(self._clear_recent_history)
+
+    def _clear_recent_history(self) -> None:
+        self._recent_store.clear()
+        self._build_recent_menu()
 
     def _open_recent_project(self) -> None:
         action = self.sender()

@@ -513,9 +513,11 @@ def test_open_recent_submenu_shows_recent_projects(qtbot, tmp_path: Path) -> Non
     menu = window.open_recent_menu
     assert menu is not None
     actions = menu.actions()
-    assert len(actions) == 2
-    assert actions[0].text() == "beta"
-    assert actions[1].text() == "alpha"
+    assert len(actions) == 4
+    assert actions[0].text() == str(p2.resolve())
+    assert actions[1].text() == str(p1.resolve())
+    assert actions[2].isSeparator()
+    assert actions[3].text() == "Clear History"
 
     assert actions[0].data() == str(p2)
     assert actions[1].data() == str(p1)
@@ -531,7 +533,7 @@ def test_open_recent_removes_missing_entry(qtbot, tmp_path: Path) -> None:
     recent_store.add(missing)
     window._build_recent_menu()
 
-    assert len(window.open_recent_menu.actions()) == 1
+    assert len(window.open_recent_menu.actions()) == 3
 
     action = window.open_recent_menu.actions()[0]
     action.triggered.emit()

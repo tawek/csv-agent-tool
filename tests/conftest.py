@@ -9,6 +9,18 @@ os.environ.setdefault("PRODUCT_DESCRIPTION_TOOL_TEST_MODE", "1")
 
 
 @pytest.fixture(autouse=True)
+def _recent_store_tmp_path(monkeypatch, tmp_path):
+    """Redirect RecentProjectsStore default path under tmp_path."""
+    from product_description_tool import config as cfg
+
+    monkeypatch.setattr(
+        cfg,
+        "user_config_dir",
+        lambda *args, **kwargs: str(tmp_path),
+    )
+
+
+@pytest.fixture(autouse=True)
 def _setup_test_mode(tmp_path_factory):
     """Enable test mode globally for all dialog abstractions.
 
