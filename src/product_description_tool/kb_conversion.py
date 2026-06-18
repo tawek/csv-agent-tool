@@ -22,6 +22,7 @@ CONVERTIBLE_EXTENSIONS: frozenset[str] = frozenset({
     ".xlsx", ".xls",
     ".html", ".htm",
     ".epub",
+    ".odt", ".ods",
 })
 
 # Complete set of direct-read and commonly known convertible extensions.
@@ -135,6 +136,7 @@ class KnowledgeBaseContentService:
     def __init__(self, cache: ConversionCache | None = None) -> None:
         self._cache = cache or ConversionCache()
         self._markitdown_available: bool | None = None
+        self._odfpy_available: bool | None = None
 
     def _check_markitdown(self) -> bool:
         if self._markitdown_available is None:
@@ -144,6 +146,15 @@ class KnowledgeBaseContentService:
             except ImportError:
                 self._markitdown_available = False
         return self._markitdown_available
+
+    def _check_odfpy(self) -> bool:
+        if self._odfpy_available is None:
+            try:
+                import odf  # noqa: F401
+                self._odfpy_available = True
+            except ImportError:
+                self._odfpy_available = False
+        return self._odfpy_available
 
     @staticmethod
     def classify_suffix(suffix: str) -> str:
@@ -164,30 +175,82 @@ class KnowledgeBaseContentService:
         return True
 
     def is_conversion_available(self) -> bool:
-        """Check whether MarkItDown is importable for conversion."""
-        return self._check_markitdown()
+        """Check whether at least one conversion backend is importable."""
+        return self._check_markitdown() or self._check_odfpy()
+
+    def _odf_suffix(self, suffix: str) -> bool:
+        return suffix.lower() in (".odt", ".ods")
 
     def validate_supported(self, file_path: Path) -> str | None:
         """Validate that *file_path* has a supported type.
 
-        Returns an error message string if conversion is required but
-        MarkItDown is unavailable.
-        Returns ``None`` when the file can be used.
+        Returns an error message string if conversion is required but the
+        required backend is unavailable.  Returns ``None`` when the file
+        can be used.
         """
-        classification = self.classify_suffix(file_path.suffix.lower())
-        if classification == "convertible" and not self._check_markitdown():
+        suffix = file_path.suffix.lower()
+        classification = self.classify_suffix(suffix)
+        if classification != "convertible":
+            return None
+        if self._odf_suffix(suffix):
+            if not self._check_odfpy():
+                return (
+                    f"file '{file_path.name}' requires odfpy for ODF conversion "
+                    "but it is not available"
+                )
+            return None
+        if not self._check_markitdown():
             return (
                 f"file '{file_path.name}' requires conversion to Markdown "
                 "but MarkItDown is not available"
             )
         return None
 
+    @staticmethod
+    def _convert_odt(file_path: Path) -> str:
+        """Extract text from an ODF text document using odfpy."""
+        from odf import opendocument, text as odf_text
+        doc = opendocument.load(str(file_path))
+        paragraphs: list[str] = []
+        for elem in doc.getElementsByType(odf_text.P):
+            text_parts: list[str] = []
+            for child in elem.childNodes:
+                if hasattr(child, "data"):
+                    text_parts.append(child.data)
+            paragraphs.append("".join(text_parts))
+        return "\n\n".join(paragraphs)
+
+    @staticmethod
+    def _convert_ods(file_path: Path) -> str:
+        """Extract text from an ODF spreadsheet using odfpy."""
+        from odf import opendocument, table as odf_table, text as odf_text
+        doc = opendocument.load(str(file_path))
+        lines: list[str] = []
+        for sheet in doc.getElementsByType(odf_table.Table):
+            name = sheet.getAttribute("name") or "Sheet"
+            lines.append(f"## {name}")
+            for row in sheet.getElementsByType(odf_table.TableRow):
+                cells: list[str] = []
+                for cell in row.getElementsByType(odf_table.TableCell):
+                    cell_text_parts: list[str] = []
+                    for p in cell.getElementsByType(odf_text.P):
+                        for child in p.childNodes:
+                            if hasattr(child, "data"):
+                                cell_text_parts.append(child.data)
+                    cells.append("".join(cell_text_parts))
+                line = " | ".join(cells)
+                if line.strip():
+                    lines.append(line)
+            lines.append("")
+        return "\n".join(lines)
+
     def load_markdown(self, file_path: Path, kb_root: Path) -> str:
         """Load KB file content as Markdown.
 
         For direct-read types (``.md``, ``.markdown``, ``.csv``) the UTF-8
         text is returned as-is.  For convertible types the file is converted
-        through MarkItDown, with transparent caching by source content hash.
+        through MarkItDown (or odfpy for ODF files), with transparent
+        caching by source content hash.
 
         Args:
             file_path: Resolved path of the KB file (must be under *kb_root*).
@@ -202,7 +265,6 @@ class KnowledgeBaseContentService:
             MarkItDownUnavailableError: Conversion needed but MarkItDown is
                 not importable.
             ConversionFailedError: Conversion attempt failed.
-            UnsupportedFileTypeError: Reserved for future explicit hard rejects.
         """
         resolved_path = file_path.resolve()
         resolved_root = kb_root.resolve()
@@ -222,7 +284,8 @@ class KnowledgeBaseContentService:
         if not resolved_path.is_file():
             raise ValueError(f"Not a file: {resolved_path}")
 
-        classification = self.classify_suffix(resolved_path.suffix.lower())
+        suffix = resolved_path.suffix.lower()
+        classification = self.classify_suffix(suffix)
 
         if classification == "direct_read":
             return resolved_path.read_text(encoding="utf-8")
@@ -232,6 +295,26 @@ class KnowledgeBaseContentService:
         if cached is not None:
             return cached
 
+        # ODF files use odfpy
+        if self._odf_suffix(suffix):
+            if not self._check_odfpy():
+                raise MarkItDownUnavailableError(
+                    f"Cannot convert '{resolved_path.name}': "
+                    "odfpy is not available."
+                )
+            try:
+                if suffix == ".ods":
+                    markdown_content = self._convert_ods(resolved_path)
+                else:
+                    markdown_content = self._convert_odt(resolved_path)
+                self._cache.store(resolved_path, markdown_content)
+                return markdown_content
+            except Exception as exc:
+                raise ConversionFailedError(
+                    f"Failed to convert '{resolved_path.name}': {exc}"
+                ) from exc
+
+        # All other convertible types go through MarkItDown
         if not self._check_markitdown():
             raise MarkItDownUnavailableError(
                 f"Cannot convert '{resolved_path.name}': "

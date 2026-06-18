@@ -18,6 +18,92 @@ from product_description_tool.kb_conversion import (
 
 
 # ===================================================================
+# Test fixture helpers — minimal valid files for real conversion
+# ===================================================================
+
+
+def _make_minimal_pdf(path: Path, text: str = "Hello PDF World") -> None:
+    """Create a minimal valid PDF with *text* on a single page."""
+    from fpdf import FPDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=12)
+    pdf.cell(0, 10, text)
+    pdf.output(str(path))
+
+
+def _make_minimal_docx(path: Path, text: str = "Hello DOCX World") -> None:
+    """Create a minimal DOCX with *text* in the document body."""
+    from docx import Document
+    doc = Document()
+    doc.add_paragraph(text)
+    doc.save(str(path))
+
+
+def _make_minimal_xlsx(path: Path, text: str = "Hello XLSX World") -> None:
+    """Create a minimal XLSX with *text* in cell A1."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A1"] = text
+    wb.save(path)
+
+
+def _make_minimal_pptx(path: Path, text: str = "Hello PPTX World") -> None:
+    """Create a minimal PPTX with one slide containing *text*."""
+    from pptx import Presentation
+    from pptx.util import Inches
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank layout
+    txBox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(8), Inches(2))
+    tf = txBox.text_frame
+    tf.text = text
+    prs.save(path)
+
+
+def _make_minimal_epub(path: Path, text: str = "Hello EPUB World") -> None:
+    """Create a minimal EPUB with *text* in the first page."""
+    from ebooklib import epub
+    book = epub.EpubBook()
+    book.set_identifier("test-book-id")
+    book.set_title("Test")
+    book.set_language("en")
+    chap = epub.EpubHtml(title="Page", file_name="content.xhtml", lang="en")
+    chap.content = f"<html><body><p>{text}</p></body></html>".encode("utf-8")
+    book.add_item(chap)
+    book.toc = [epub.Link("content.xhtml", "Page", "page")]
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", chap]
+    epub.write_epub(str(path), book)
+
+
+def _make_minimal_odt(path: Path, text: str = "Hello ODT World") -> None:
+    """Create a minimal ODF text document with *text*."""
+    from odf.opendocument import OpenDocumentText
+    from odf.text import P
+    doc = OpenDocumentText()
+    doc.text.addElement(P(text=text))
+    doc.save(str(path))
+
+
+def _make_minimal_ods(path: Path, text: str = "Hello ODS World") -> None:
+    """Create a minimal ODF spreadsheet with *text* in cell A1."""
+    from odf.opendocument import OpenDocumentSpreadsheet
+    from odf.table import Table, TableRow, TableCell
+    from odf.text import P
+    doc = OpenDocumentSpreadsheet()
+    table = Table(name="Sheet1")
+    tr = TableRow()
+    tc = TableCell()
+    tc.addElement(P(text=text))
+    tr.addElement(tc)
+    table.addElement(tr)
+    doc.spreadsheet.addElement(table)
+    doc.save(str(path))
+
+
+# ===================================================================
 # Extension classification tests
 # ===================================================================
 
@@ -37,6 +123,8 @@ class TestClassification:
         assert ".xlsx" in CONVERTIBLE_EXTENSIONS
         assert ".html" in CONVERTIBLE_EXTENSIONS
         assert ".epub" in CONVERTIBLE_EXTENSIONS
+        assert ".odt" in CONVERTIBLE_EXTENSIONS
+        assert ".ods" in CONVERTIBLE_EXTENSIONS
 
     def test_all_kb_extensions_union(self) -> None:
         assert ALL_KB_EXTENSIONS == DIRECT_READ_EXTENSIONS | CONVERTIBLE_EXTENSIONS
@@ -341,7 +429,7 @@ class TestKnowledgeBaseContentService:
             svc.load_markdown(pdf, kb_dir)
 
     # ------------------------------------------------------------------
-    # Real-world PDF/Office conversion (happy path)
+    # Real conversion tests — one per CONVERTIBLE_EXTENSIONS group
     # ------------------------------------------------------------------
 
     def test_load_markdown_html_conversion(self, kb_dir: Path) -> None:
@@ -360,8 +448,63 @@ class TestKnowledgeBaseContentService:
         assert "Article Title" in result
         assert "First paragraph" in result
         assert "Item A" in result
-        # Should not contain raw HTML tags
         assert "<h1>" not in result
+
+    def test_load_markdown_pdf_conversion(self, kb_dir: Path) -> None:
+        """Minimal PDF with text content is converted to Markdown."""
+        pdf_path = kb_dir / "doc.pdf"
+        _make_minimal_pdf(pdf_path, "Hello PDF World")
+        svc = KnowledgeBaseContentService()
+        result = svc.load_markdown(pdf_path, kb_dir)
+        assert "Hello PDF World" in result
+
+    def test_load_markdown_docx_conversion(self, kb_dir: Path) -> None:
+        """Minimal DOCX is converted to Markdown."""
+        docx_path = kb_dir / "report.docx"
+        _make_minimal_docx(docx_path, "Hello DOCX World")
+        svc = KnowledgeBaseContentService()
+        result = svc.load_markdown(docx_path, kb_dir)
+        assert "Hello DOCX World" in result
+
+    def test_load_markdown_xlsx_conversion(self, kb_dir: Path) -> None:
+        """Minimal XLSX is converted to Markdown (cell text extracted)."""
+        xlsx_path = kb_dir / "data.xlsx"
+        _make_minimal_xlsx(xlsx_path, "Hello XLSX World")
+        svc = KnowledgeBaseContentService()
+        result = svc.load_markdown(xlsx_path, kb_dir)
+        assert "Hello XLSX World" in result
+
+    def test_load_markdown_pptx_conversion(self, kb_dir: Path) -> None:
+        """Minimal PPTX is converted to Markdown (slide text extracted)."""
+        pptx_path = kb_dir / "slides.pptx"
+        _make_minimal_pptx(pptx_path, "Hello PPTX World")
+        svc = KnowledgeBaseContentService()
+        result = svc.load_markdown(pptx_path, kb_dir)
+        assert "Hello PPTX World" in result
+
+    def test_load_markdown_epub_conversion(self, kb_dir: Path) -> None:
+        """Minimal EPUB is converted to Markdown."""
+        epub_path = kb_dir / "book.epub"
+        _make_minimal_epub(epub_path, "Hello EPUB World")
+        svc = KnowledgeBaseContentService()
+        result = svc.load_markdown(epub_path, kb_dir)
+        assert "Hello EPUB World" in result
+
+    def test_load_markdown_odt_conversion(self, kb_dir: Path) -> None:
+        """Minimal ODT is converted to Markdown."""
+        odt_path = kb_dir / "document.odt"
+        _make_minimal_odt(odt_path, "Hello ODT World")
+        svc = KnowledgeBaseContentService()
+        result = svc.load_markdown(odt_path, kb_dir)
+        assert "Hello ODT World" in result
+
+    def test_load_markdown_ods_conversion(self, kb_dir: Path) -> None:
+        """Minimal ODS is converted to Markdown (cell text extracted)."""
+        ods_path = kb_dir / "spreadsheet.ods"
+        _make_minimal_ods(ods_path, "Hello ODS World")
+        svc = KnowledgeBaseContentService()
+        result = svc.load_markdown(ods_path, kb_dir)
+        assert "Hello ODS World" in result
 
 
 # ===================================================================
