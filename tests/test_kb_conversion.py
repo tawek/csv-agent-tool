@@ -9,6 +9,7 @@ import pytest
 from product_description_tool.kb_conversion import (
     ALL_KB_EXTENSIONS,
     CONVERTIBLE_EXTENSIONS,
+    ConversionBackendUnavailableError,
     DIRECT_READ_EXTENSIONS,
     ConversionCache,
     ConversionFailedError,
@@ -405,6 +406,24 @@ class TestKnowledgeBaseContentService:
         with pytest.raises(MarkItDownUnavailableError, match="not available"):
             svc.load_markdown(pdf, kb_dir)
 
+    def test_load_markdown_raises_when_odfpy_unavailable(
+        self, kb_dir: Path, monkeypatch
+    ) -> None:
+        """ODS files report the actual missing backend."""
+        import product_description_tool.kb_conversion as kc
+
+        monkeypatch.setattr(
+            kc.KnowledgeBaseContentService,
+            "_check_odfpy",
+            lambda self: False,
+        )
+
+        ods = kb_dir / "test.ods"
+        _make_minimal_ods(ods, "Hello ODS World")
+        svc = KnowledgeBaseContentService()
+        with pytest.raises(ConversionBackendUnavailableError, match="odfpy"):
+            svc.load_markdown(ods, kb_dir)
+
     def test_load_markdown_handles_conversion_failure(
         self, kb_dir: Path, monkeypatch
     ) -> None:
@@ -497,6 +516,25 @@ class TestKnowledgeBaseContentService:
         svc = KnowledgeBaseContentService()
         result = svc.load_markdown(odt_path, kb_dir)
         assert "Hello ODT World" in result
+
+    def test_load_markdown_odt_sample_preserves_structure(self) -> None:
+        """Sample ODT keeps key Markdown structure instead of flattening text."""
+        repo_root = Path(__file__).resolve().parents[1]
+        kb_dir = repo_root / "sample" / "kb"
+        odt_path = kb_dir / "shopvibe-overview.odt"
+
+        svc = KnowledgeBaseContentService()
+        result = svc.load_markdown(odt_path, kb_dir)
+
+        assert "# ShopVibe" in result
+        assert "## 1. About Us" in result
+        assert "### Corporate Identity" in result
+        assert "- **Registered name:** VibeTrade Inc." in result
+        assert "```" in result
+        assert "/categories/electronics" in result
+        assert "| Order value | Shipping charge | Delivery estimate |" in result
+        assert "1. **\"Everyday Upgrade\"**" in result
+        assert "Chat: average wait time < 90 seconds." in result
 
     def test_load_markdown_ods_conversion(self, kb_dir: Path) -> None:
         """Minimal ODS is converted to Markdown (cell text extracted)."""
