@@ -124,6 +124,18 @@ class KnowledgeBaseManager(QDialog):
 
         actions_row.addStretch(1)
 
+        self._new_folder_button = QPushButton("New Folder...")
+        self._new_folder_button.clicked.connect(self._create_folder)
+        actions_row.addWidget(self._new_folder_button)
+
+        self._new_md_button = QPushButton("New Markdown...")
+        self._new_md_button.clicked.connect(self._create_markdown_file)
+        actions_row.addWidget(self._new_md_button)
+
+        self._new_csv_button = QPushButton("New CSV...")
+        self._new_csv_button.clicked.connect(self._create_csv_file)
+        actions_row.addWidget(self._new_csv_button)
+
         self._copy_button = QPushButton("Copy...")
         self._copy_button.clicked.connect(self._copy_selected)
         actions_row.addWidget(self._copy_button)
@@ -131,6 +143,10 @@ class KnowledgeBaseManager(QDialog):
         self._rename_button = QPushButton("Rename...")
         self._rename_button.clicked.connect(self._rename_selected)
         actions_row.addWidget(self._rename_button)
+
+        self._move_button = QPushButton("Move...")
+        self._move_button.clicked.connect(self._move_selected)
+        actions_row.addWidget(self._move_button)
 
         self._delete_button = QPushButton("Delete")
         self._delete_button.clicked.connect(self._delete_selected)
@@ -153,6 +169,18 @@ class KnowledgeBaseManager(QDialog):
 
         self._tree.addAction(QAction("---", self))  # separator
 
+        self._ctx_new_folder = QAction("New Folder...", self)
+        self._ctx_new_folder.triggered.connect(self._create_folder)
+        self._tree.addAction(self._ctx_new_folder)
+
+        self._ctx_new_md = QAction("New Markdown...", self)
+        self._ctx_new_md.triggered.connect(self._create_markdown_file)
+        self._tree.addAction(self._ctx_new_md)
+
+        self._ctx_new_csv = QAction("New CSV...", self)
+        self._ctx_new_csv.triggered.connect(self._create_csv_file)
+        self._tree.addAction(self._ctx_new_csv)
+
         self._ctx_copy = QAction("Copy...", self)
         self._ctx_copy.triggered.connect(self._copy_selected)
         self._tree.addAction(self._ctx_copy)
@@ -160,6 +188,10 @@ class KnowledgeBaseManager(QDialog):
         self._ctx_rename = QAction("Rename...", self)
         self._ctx_rename.triggered.connect(self._rename_selected)
         self._tree.addAction(self._ctx_rename)
+
+        self._ctx_move = QAction("Move...", self)
+        self._ctx_move.triggered.connect(self._move_selected)
+        self._tree.addAction(self._ctx_move)
 
         self._ctx_delete = QAction("Delete", self)
         self._ctx_delete.triggered.connect(self._delete_selected)
@@ -203,7 +235,13 @@ class KnowledgeBaseManager(QDialog):
         self._open_explorer_button.setEnabled(has_root)
 
         # File-management buttons
-        self._open_external_button.setEnabled(has_root and count >= 1)
+        open_external_enabled = has_root and count >= 1
+        create_enabled = has_root
+        single_selection_enabled = has_root and count == 1
+        self._open_external_button.setEnabled(open_external_enabled)
+        self._new_folder_button.setEnabled(create_enabled)
+        self._new_md_button.setEnabled(create_enabled)
+        self._new_csv_button.setEnabled(create_enabled)
         single = self._selected_single_path()
         single_path = Path(single) if single is not None else None
         single_suffix = single_path.suffix.lower() if single_path is not None else ""
@@ -226,9 +264,127 @@ class KnowledgeBaseManager(QDialog):
             self._edit_button.setText("View")
         else:
             self._edit_button.setText("Edit")
-        self._copy_button.setEnabled(has_root and count == 1)
-        self._rename_button.setEnabled(has_root and count == 1)
+        self._copy_button.setEnabled(single_selection_enabled)
+        self._rename_button.setEnabled(single_selection_enabled)
+        self._move_button.setEnabled(single_selection_enabled)
         self._delete_button.setEnabled(has_root and count >= 1)
+
+        self._ctx_edit.setEnabled(is_editable or is_viewable)
+        self._ctx_open_external.setEnabled(open_external_enabled)
+        self._ctx_new_folder.setEnabled(create_enabled)
+        self._ctx_new_md.setEnabled(create_enabled)
+        self._ctx_new_csv.setEnabled(create_enabled)
+        self._ctx_copy.setEnabled(single_selection_enabled)
+        self._ctx_rename.setEnabled(single_selection_enabled)
+        self._ctx_move.setEnabled(single_selection_enabled)
+        self._ctx_delete.setEnabled(has_root and count >= 1)
+
+    def _default_creation_parent(self) -> Path:
+        """Return the folder where a new KB file should be created."""
+        if self._kb_directory is None:
+            raise ValueError("No knowledge-base directory is configured.")
+        single = self._selected_single_path()
+        if not single:
+            return Path(self._kb_directory).resolve()
+        selected_path = self._assert_within_kb_root(single)
+        return selected_path if selected_path.is_dir() else selected_path.parent
+
+    def _create_file(self, *, suffix: str, caption: str, default_name: str) -> None:
+        try:
+            parent = self._default_creation_parent()
+        except ValueError as exc:
+            critical(self, "Access denied", str(exc))
+            return
+
+        new_name, accepted = input_dialog.get_text(
+            self,
+            caption,
+            f"New {suffix} file name:",
+            text=default_name,
+        )
+        if not accepted or not new_name.strip():
+            return
+
+        final_name = new_name.strip()
+        if Path(final_name).suffix.lower() != suffix:
+            final_name = f"{final_name}{suffix}"
+
+        target = parent / final_name
+        try:
+            self._assert_within_kb_root(target)
+        except ValueError as exc:
+            critical(self, "Access denied", str(exc))
+            return
+
+        if target.exists():
+            warning(
+                self,
+                "File already exists",
+                f"'{target.name}' already exists.",
+            )
+            return
+
+        try:
+            target.write_text("", encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            critical(
+                self,
+                "Create failed",
+                f"Could not create '{target}':\n{exc}",
+            )
+            return
+
+        self._rebuild_tree()
+        self._open_file_for_edit(str(target))
+
+    def _create_folder(self) -> None:
+        try:
+            parent = self._default_creation_parent()
+        except ValueError as exc:
+            critical(self, "Access denied", str(exc))
+            return
+
+        new_name, accepted = input_dialog.get_text(
+            self,
+            "New Folder",
+            "New folder name:",
+            text="untitled-folder",
+        )
+        if not accepted or not new_name.strip():
+            return
+
+        target = parent / new_name.strip()
+        try:
+            self._assert_within_kb_root(target)
+        except ValueError as exc:
+            critical(self, "Access denied", str(exc))
+            return
+
+        if target.exists():
+            warning(
+                self,
+                "Folder already exists",
+                f"'{target.name}' already exists.",
+            )
+            return
+
+        try:
+            target.mkdir(parents=False, exist_ok=False)
+        except Exception as exc:  # noqa: BLE001
+            critical(
+                self,
+                "Create failed",
+                f"Could not create '{target}':\n{exc}",
+            )
+            return
+
+        self._rebuild_tree()
+
+    def _create_markdown_file(self) -> None:
+        self._create_file(suffix=".md", caption="New Markdown File", default_name="untitled.md")
+
+    def _create_csv_file(self) -> None:
+        self._create_file(suffix=".csv", caption="New CSV File", default_name="untitled.csv")
 
     # ------------------------------------------------------------------
     # KB-root boundary enforcement
@@ -263,6 +419,14 @@ class KnowledgeBaseManager(QDialog):
             self._kb_directory or "",
         )
         if not directory:
+            return
+        resolved = Path(directory).resolve()
+        if not resolved.is_dir():
+            critical(
+                self,
+                "Invalid directory",
+                f"'{directory}' is not an accessible directory.",
+            )
             return
         self._kb_directory = directory
         self._dir_label.setText(directory)
@@ -542,6 +706,75 @@ class KnowledgeBaseManager(QDialog):
                 f"Could not rename '{source}' to '{target}':\n{exc}",
             )
             return
+        self._rebuild_tree()
+
+    def _move_selected(self) -> None:
+        path = self._selected_single_path()
+        if not path:
+            return
+        source = Path(path)
+        try:
+            source = self._assert_within_kb_root(source)
+            kb_root = self._assert_within_kb_root(self._kb_directory)
+        except ValueError as exc:
+            critical(self, "Access denied", str(exc))
+            return
+
+        relative_hint = str(source.parent.relative_to(kb_root).as_posix()) if source.parent != kb_root else ""
+        dest_text, accepted = input_dialog.get_text(
+            self,
+            "Move",
+            "Destination folder (relative to KB root):",
+            text=relative_hint,
+        )
+        if not accepted:
+            return
+
+        dest_text = dest_text.strip()
+        destination_dir = kb_root if not dest_text else kb_root / dest_text
+        try:
+            destination_dir = self._assert_within_kb_root(destination_dir)
+        except ValueError as exc:
+            critical(self, "Access denied", str(exc))
+            return
+
+        if not destination_dir.exists() or not destination_dir.is_dir():
+            warning(
+                self,
+                "Invalid destination",
+                f"Destination folder '{dest_text or '.'}' does not exist.",
+            )
+            return
+
+        if source.is_dir() and (destination_dir == source or source in destination_dir.parents):
+            warning(
+                self,
+                "Invalid destination",
+                "A folder cannot be moved into itself or one of its subfolders.",
+            )
+            return
+
+        target = destination_dir / source.name
+        if target == source:
+            return
+        if target.exists():
+            warning(
+                self,
+                "Destination already exists",
+                f"'{target.name}' already exists in the destination folder.",
+            )
+            return
+
+        try:
+            source.rename(target)
+        except Exception as exc:  # noqa: BLE001
+            critical(
+                self,
+                "Move failed",
+                f"Could not move '{source}' to '{target}':\n{exc}",
+            )
+            return
+
         self._rebuild_tree()
 
     def _delete_selected(self) -> None:

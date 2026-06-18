@@ -58,6 +58,11 @@ class TestDirectoryManagement:
         # File actions disabled when no root
         assert window._open_external_button.isEnabled() is False
         assert window._edit_button.isEnabled() is False
+        assert window._ctx_new_folder.isEnabled() is False
+        assert window._ctx_new_md.isEnabled() is False
+        assert window._ctx_new_csv.isEnabled() is False
+        assert window._new_md_button.isEnabled() is False
+        assert window._new_csv_button.isEnabled() is False
         assert window._copy_button.isEnabled() is False
         assert window._rename_button.isEnabled() is False
         assert window._delete_button.isEnabled() is False
@@ -73,6 +78,9 @@ class TestDirectoryManagement:
         assert window._dir_label.text() == str(kb_dir)
         assert window._clear_dir_button.isEnabled() is True
         assert window._open_explorer_button.isEnabled() is True
+        assert window._new_folder_button.isEnabled() is True
+        assert window._new_md_button.isEnabled() is True
+        assert window._new_csv_button.isEnabled() is True
         # File actions enabled (no selection, but has root)
         assert window._open_external_button.isEnabled() is False  # no selection
         assert window._edit_button.isEnabled() is False  # no selection
@@ -123,6 +131,29 @@ class TestDirectoryManagement:
         assert len(emitted) == 0
         assert window._kb_directory is None
         assert window._dir_label.text() == "(not set)"
+
+    def test_set_directory_rejects_invalid_path(self, qtbot, tmp_path: Path) -> None:
+        """An invalid selected directory is rejected and reported."""
+        window = KnowledgeBaseManager(kb_directory=None)
+        qtbot.addWidget(window)
+
+        invalid_path = tmp_path / "missing-dir"
+        file_dialog.set_response("getExistingDirectory", str(invalid_path))
+
+        critical_messages = []
+
+        def fake_critical(parent, title, text, *args, **kwargs):
+            critical_messages.append((title, text))
+            return QMessageBox.StandardButton.Ok
+
+        message_box.set_response("critical", fake_critical)
+        window._set_directory()
+
+        file_dialog.reset()
+        message_box.reset()
+        assert critical_messages
+        assert critical_messages[0][0] == "Invalid directory"
+        assert window._kb_directory is None
 
     def test_file_dialog_uses_qfiledialog_option_type(self, monkeypatch) -> None:
         """The directory wrapper passes a QFileDialog.Option value in production mode."""
@@ -278,6 +309,147 @@ class TestFileOperations:
         input_dialog.reset()
         assert (kb_dir / "faq_copy.md").exists()
 
+    def test_create_markdown_file_at_root_and_open_editor(self, qtbot, kb_dir: Path, monkeypatch) -> None:
+        """Creating a markdown file at root appends .md and opens the text editor."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        opened: list[Path] = []
+        monkeypatch.setattr(window, "_edit_text_file", lambda path: opened.append(path))
+        input_dialog.set_response("getText", ("brief", True))
+
+        window._create_markdown_file()
+
+        input_dialog.reset()
+        created = kb_dir / "brief.md"
+        assert created.exists()
+        assert opened == [created]
+
+    def test_create_folder_at_root(self, qtbot, kb_dir: Path) -> None:
+        """Creating a folder at root succeeds."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        input_dialog.set_response("getText", ("drafts", True))
+
+        window._create_folder()
+
+        input_dialog.reset()
+        assert (kb_dir / "drafts").is_dir()
+
+    def test_create_csv_file_in_selected_directory(self, qtbot, kb_dir: Path, monkeypatch) -> None:
+        """Creating a csv file with a selected folder uses that folder."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        subdir_index = window._model.index(str(kb_dir / "subdir"))
+        window._tree.selectionModel().select(
+            subdir_index,
+            window._tree.selectionModel().SelectionFlag.Select,
+        )
+
+        opened: list[Path] = []
+        monkeypatch.setattr(window, "_edit_csv_file", lambda path: opened.append(path))
+        input_dialog.set_response("getText", ("sheet.csv", True))
+
+        window._create_csv_file()
+
+        input_dialog.reset()
+        created = kb_dir / "subdir" / "sheet.csv"
+        assert created.exists()
+        assert opened == [created]
+
+    def test_create_markdown_file_next_to_selected_file(self, qtbot, kb_dir: Path, monkeypatch) -> None:
+        """Creating with a file selected uses the file's parent folder."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        faq_index = window._model.index(str(kb_dir / "faq.md"))
+        window._tree.selectionModel().select(
+            faq_index,
+            window._tree.selectionModel().SelectionFlag.Select,
+        )
+
+        opened: list[Path] = []
+        monkeypatch.setattr(window, "_edit_text_file", lambda path: opened.append(path))
+        input_dialog.set_response("getText", ("sibling.md", True))
+
+        window._create_markdown_file()
+
+        input_dialog.reset()
+        created = kb_dir / "sibling.md"
+        assert created.exists()
+        assert opened == [created]
+
+    def test_create_file_does_not_overwrite_existing(self, qtbot, kb_dir: Path, monkeypatch) -> None:
+        """Creating a file with an existing name shows a warning and leaves it unchanged."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        warnings: list[tuple[str, str]] = []
+
+        def fake_warning(parent, title, text, *args, **kwargs):
+            warnings.append((title, text))
+            return QMessageBox.StandardButton.Ok
+
+        message_box.set_response("warning", fake_warning)
+        input_dialog.set_response("getText", ("faq.md", True))
+
+        window._create_markdown_file()
+
+        input_dialog.reset()
+        message_box.reset()
+        assert warnings
+        assert warnings[0][0] == "File already exists"
+
+    def test_move_file_to_other_folder(self, qtbot, kb_dir: Path) -> None:
+        """Moving a file relocates it into an existing destination folder."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        faq_index = window._model.index(str(kb_dir / "faq.md"))
+        window._tree.selectionModel().select(
+            faq_index,
+            window._tree.selectionModel().SelectionFlag.Select,
+        )
+        input_dialog.set_response("getText", ("subdir", True))
+
+        window._move_selected()
+
+        input_dialog.reset()
+        assert not (kb_dir / "faq.md").exists()
+        assert (kb_dir / "subdir" / "faq.md").exists()
+
+    def test_move_folder_rejects_subtree_destination(self, qtbot, kb_dir: Path) -> None:
+        """A folder cannot be moved into one of its own descendants."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        nested = kb_dir / "subdir" / "nested"
+        nested.mkdir()
+        subdir_index = window._model.index(str(kb_dir / "subdir"))
+        window._tree.selectionModel().select(
+            subdir_index,
+            window._tree.selectionModel().SelectionFlag.Select,
+        )
+
+        warnings: list[tuple[str, str]] = []
+
+        def fake_warning(parent, title, text, *args, **kwargs):
+            warnings.append((title, text))
+            return QMessageBox.StandardButton.Ok
+
+        message_box.set_response("warning", fake_warning)
+        input_dialog.set_response("getText", ("subdir/nested", True))
+
+        window._move_selected()
+
+        input_dialog.reset()
+        message_box.reset()
+        assert warnings
+        assert warnings[0][0] == "Invalid destination"
+        assert (kb_dir / "subdir").exists()
+
     def test_copy_file_cancelled_does_nothing(self, qtbot, kb_dir: Path, monkeypatch) -> None:
         """When user cancels the copy dialog, no copy occurs."""
         window = KnowledgeBaseManager(kb_directory=str(kb_dir))
@@ -375,6 +547,26 @@ class TestFileOperations:
 
         assert not (kb_dir / "faq.md").exists()
         assert not (kb_dir / "notes.txt").exists()
+
+    def test_delete_folder_recursive_with_confirmation(self, qtbot, kb_dir: Path) -> None:
+        """Deleting a selected folder removes nested contents recursively."""
+        window = KnowledgeBaseManager(kb_directory=str(kb_dir))
+        qtbot.addWidget(window)
+
+        nested = kb_dir / "subdir" / "nested.txt"
+        nested.write_text("nested", encoding="utf-8")
+
+        subdir_index = window._model.index(str(kb_dir / "subdir"))
+        window._tree.selectionModel().select(
+            subdir_index,
+            window._tree.selectionModel().SelectionFlag.Select,
+        )
+
+        message_box.set_response("question", QMessageBox.StandardButton.Yes)
+        window._delete_selected()
+        message_box.reset()
+
+        assert not (kb_dir / "subdir").exists()
         assert (kb_dir / "data.csv").exists()  # not selected
 
     def test_open_selected_external_calls_open_external(
